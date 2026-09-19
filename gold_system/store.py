@@ -41,11 +41,16 @@ class Store:
             self.db.commit()
             return True
         except sqlite3.IntegrityError:
+            self.db.rollback()
             return False
 
     def finish(self, signal_id, status):
         self.db.execute("UPDATE intents SET state=? WHERE id=?", (status, signal_id))
         self.db.commit()
+
+    def unresolved_intents(self):
+        return [r[0] for r in self.db.execute(
+            "SELECT id FROM intents WHERE state IN ('PENDING', 'UNKNOWN') ORDER BY id")]
 
     def get(self, key, default=None):
         row = self.db.execute("SELECT value FROM state WHERE key=?", (key,)).fetchone()
@@ -61,3 +66,25 @@ class Store:
 
     def close(self):
         self.db.close()
+
+    def stop_new_entries(self):
+        """操作者停止新風險的持久化鎖；狀態與稽核事件必須一起提交。
+
+        此操作不平倉、不取消券商掛單，也不提供解除交易鎖的捷徑。
+        """
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            self.db.execute("INSERT OR REPLACE INTO state VALUES('operator_stop_new', 'true')")
+            self.db.execute("INSERT INTO events(time,kind,payload) VALUES(?,?,?)",
+                            (datetime.now(timezone.utc).isoformat(), "OPERATOR_STOP_NEW", '{}'))
+            self.db.commit()
+        except BaseException:
+            self.db.rollback()
+            raise
+
+    def entries_stopped(self):
+        # 缺值代表尚未下停止命令；壞資料或讀取失敗不能被當作允許新風險。
+        try:
+            return self.get("operator_stop_new", False) is not False
+        except Exception:
+            return True

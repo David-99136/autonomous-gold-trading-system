@@ -44,6 +44,38 @@ class SystemTests(unittest.TestCase):
         self.assertLessEqual(p.margin, D(2000))
         self.assertEqual((p.size / 2) % self.contract.increment, 0)
 
+    def test_operator_stop_persists_across_connections_and_blocks_entry(self):
+        control = Store(Path(self.tmp.name) / "audit.db")
+        try:
+            control.stop_new_entries()
+        finally:
+            control.close()
+        self.tick(self.s)
+        self.assertIsNone(self.broker.position)
+        self.assertTrue(self.store.entries_stopped())
+        self.assertEqual(self.store.events()[-1]["payload"]["reason"], "OPERATOR_STOP_NEW")
+
+    def test_operator_stop_does_not_disable_hard_stop_management(self):
+        self.tick(self.s)
+        self.assertIsNotNone(self.broker.position)
+        self.store.stop_new_entries()
+        self.tick(quote=Quote(self.now, D(1989), D("1989.5")))
+        self.assertIsNone(self.broker.position)
+        self.assertTrue(self.store.entries_stopped())
+
+    def test_operator_stop_corrupt_value_is_fail_closed(self):
+        self.store.set("operator_stop_new", "false")
+        self.tick(self.s)
+        self.assertIsNone(self.broker.position)
+
+    def test_operator_stop_audit_failure_rolls_back_state(self):
+        self.store.db.execute("CREATE TRIGGER fail_control BEFORE INSERT ON events "
+                              "WHEN NEW.kind='OPERATOR_STOP_NEW' BEGIN SELECT RAISE(ABORT, 'test'); END")
+        self.store.db.commit()
+        with self.assertRaises(Exception):
+            self.store.stop_new_entries()
+        self.assertFalse(self.store.entries_stopped())
+
     def test_quality_fail_closed(self):
         cases = [dict(tradeable=False), dict(liquid_window=False), dict(data_complete=False),
                  dict(extreme_volatility=True), dict(clock_offset_ms=1001), dict(minutes_to_boundary=D(30)),
@@ -89,6 +121,28 @@ class SystemTests(unittest.TestCase):
         self.tick(self.s)
         self.tick(quality=replace(self.quality, minutes_to_boundary=D(10), analysis_available=False))
         self.assertIsNone(self.broker.position)
+
+    def test_cost_ledger_blocks_entries_but_not_stop_management(self):
+        from gold_system.costs import CostLedger
+        self.tick(self.s)
+        self.engine.cost_ledger = CostLedger(self.store)
+        self.tick(quote=Quote(self.now, D(1989), D("1989.5")))
+        self.assertIsNone(self.broker.position)
+        self.tick(replace(self.s, signal_id="new"))
+        self.assertEqual(self.broker.submissions, 1)
+        self.assertEqual(self.store.events()[-1]["payload"]["reason"], "BUDGET_EXHAUSTED")
+
+    def test_cost_database_failure_does_not_prevent_session_exit(self):
+        from unittest.mock import Mock
+        self.tick(self.s)
+        ledger = Mock()
+        ledger.status.side_effect = RuntimeError("broken ledger")
+        self.engine.cost_ledger = ledger
+        self.tick(quality=replace(self.quality, minutes_to_boundary=D(10)))
+        self.assertIsNone(self.broker.position)
+        ledger.status.assert_not_called()
+        self.tick(replace(self.s, signal_id="next"))
+        self.assertEqual(self.store.events()[-1]["payload"]["reason"], "BUDGET_STATE_UNAVAILABLE")
 
     def test_soft_realized_latch_and_not_floating(self):
         self.tick(self.s)

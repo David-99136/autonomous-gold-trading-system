@@ -12,6 +12,11 @@ class Position:
     initial_distance: D
     value_per_point: D
     partial_taken: bool = False
+    original_risk: D = D(0)
+    initial_entry: D = D(0)
+    opened_at: object = None
+    mode: object = None
+    added: bool = False
 
 
 class PaperBroker:
@@ -27,7 +32,22 @@ class PaperBroker:
         self.submissions += 1
         fill = plan.entry + self.slippage * plan.signal.direction.sign
         self.position = Position(plan.signal.direction, plan.size, fill, plan.signal.stop,
-                                 abs(fill - plan.signal.stop), contract.value_per_point)
+                                 plan.risk / plan.size + self.slippage, contract.value_per_point,
+                                 original_risk=plan.risk, initial_entry=fill,
+                                 opened_at=plan.signal.created, mode=plan.signal.mode)
+        return fill
+
+    def add(self, plan):
+        p = self.position
+        if not p or p.added or plan.signal.direction != p.direction or plan.size <= 0:
+            raise Rejected("INVALID_ADD_ON")
+        if (plan.signal.stop - p.stop) * p.direction.sign < 0:
+            raise Rejected("STOP_CANNOT_LOOSEN")
+        fill = plan.entry + self.slippage * p.direction.sign
+        total = p.size + plan.size
+        p.entry = (p.entry * p.size + fill * plan.size) / total
+        p.size, p.stop, p.added = total, plan.signal.stop, True
+        self.submissions += 1
         return fill
 
     def tighten(self, stop):

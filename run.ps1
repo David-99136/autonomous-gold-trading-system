@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('replay', 'test', 'credentials-set', 'demo-discover')]
+    [ValidateSet('replay', 'test', 'credentials-set', 'demo-discover', 'demo-reconcile', 'cost-status')]
     [string]$Action = 'replay'
 )
 $ErrorActionPreference = 'Stop'

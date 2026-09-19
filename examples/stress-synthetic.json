@@ -1,0 +1,7 @@
+{
+  "type": "SYNTHETIC_FUNCTION_TEST_ONLY",
+  "qualified": false,
+  "trade_paths": [
+    {"returns": ["0", "-0.20", "0.01"]}
+  ]
+}
