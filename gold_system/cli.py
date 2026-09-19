@@ -53,26 +53,139 @@ def main():
     csv_parser.add_argument("--csv", required=True)
     csv_parser.add_argument("--contract", required=True)
     csv_parser.add_argument("--output", required=True)
+    walk = sub.add_parser("walk-forward-csv", help="Frozen price-prototype OOS replay; no AI training or qualification")
+    walk.add_argument("--csv", required=True)
+    walk.add_argument("--contract", required=True)
+    walk.add_argument("--output", required=True)
+    walk.add_argument("--train-size", type=int, required=True)
+    walk.add_argument("--test-size", type=int, required=True)
+    walk.add_argument("--purge-size", type=int, default=0)
+    walk.add_argument("--initial-equity", required=True)
     sub.add_parser("credentials-set", help="Interactively save Demo credentials to Windows vault")
+    codex_check = sub.add_parser("codex-check", help="One Codex subscription call with synthetic NO_TRADE input; no broker access")
+    codex_check.add_argument("--model", help="Optional explicit Codex model; omitted uses CLI default")
     discovery = sub.add_parser("demo-discover", help="Demo login and read market data only")
     discovery.add_argument("--epic", help="Inspect a previously discovered epic")
     discovery.add_argument("--output", default="runtime/discovery.json")
+    capture = sub.add_parser("demo-history", help="Download raw Demo GOLD minute history; no orders")
+    capture.add_argument("--start", required=True, help="ISO timestamp with offset")
+    capture.add_argument("--end", required=True, help="ISO timestamp with offset")
+    capture.add_argument("--output", required=True)
+    audit = sub.add_parser("history-audit", help="Offline history checksums and reconstruction; no broker calls")
+    audit.add_argument("--directory", required=True)
+    reconcile = sub.add_parser("demo-reconcile", help="Read-only Demo exposure inspection; never unlocks trading")
+    reconcile.add_argument("--database", default="runtime/demo-audit.db")
+    reconcile.add_argument("--async-http", action="store_true", help="Use pooled async Demo reads; writes remain disabled")
+    costs = sub.add_parser("cost-status", help="Local USD budget status; no provider calls or budget changes")
+    costs.add_argument("--database", default="runtime/demo-audit.db")
+    stop = sub.add_parser("stop-new", help="Persistently block new entries; does not flatten or cancel orders")
+    stop.add_argument("--database", required=True, help="Existing engine/gateway audit database")
+    stress = sub.add_parser("stress-replay", help="Offline MTM path stress from replay report; not qualification")
+    stress.add_argument("--report", required=True)
+    stress.add_argument("--output", required=True)
+    stress.add_argument("--simulations", type=int, default=1000)
+    stress.add_argument("--block-size", type=int, default=5)
+    stress.add_argument("--seed", type=int, default=0)
+    stress.add_argument("--extra-cost-fraction", default="0")
     args = parser.parse_args()
     if args.command == "replay":
         asyncio.run(replay(args.output))
+    elif args.command == "codex-check":
+        from .codex_analysis import CodexAnalysis
+        report = asyncio.run(CodexAnalysis(model=args.model).select([], {"evidence_eligible": False,
+            "records": {}, "purpose": "SYNTHETIC_CONNECTIVITY_CHECK_NO_MARKET_DATA"}))
+        print(json.dumps(report, ensure_ascii=False))
+    elif args.command == "history-audit":
+        from .history import audit_download
+        print(json.dumps(audit_download(args.directory), ensure_ascii=False))
+    elif args.command == "stop-new":
+        if not Path(args.database).is_file():
+            parser.error("stop-new requires an existing database; no database was created")
+        store = Store(args.database)
+        try:
+            store.stop_new_entries()
+            print(json.dumps({"database": str(Path(args.database).resolve()), "new_entries_stopped": True,
+                              "broker_flattened": False, "broker_orders_cancelled": False}))
+        finally:
+            store.close()
     elif args.command == "replay-csv":
         from .replay import replay_csv
         report = asyncio.run(replay_csv(args.csv, args.contract, args.output))
         print(json.dumps({"metrics": report["metrics"], "qualified": False}, default=str))
+    elif args.command == "walk-forward-csv":
+        from .replay import read_candles
+        from .walk_forward import run_walk_forward, replay_evaluator
+        data = json.loads(Path(args.contract).read_text(encoding="utf-8"))
+        contract = Contract(data["epic"], **{k: D(str(v)) for k, v in data.items() if k != "epic"})
+        root = Path(args.output)
+        if root.exists():
+            parser.error("walk-forward-csv requires a new output directory")
+        config = {"strategy_version": RiskPolicy().version, "model_version": "NOT_USED", "prompt_version": "NOT_USED"}
+        # 固定版本基準，不根據訓練或測試的收益挑參數；不能稱為已訓練 AI。
+        result = run_walk_forward(read_candles(args.csv), lambda _: dict(config),
+            replay_evaluator(contract, root/"replays"), root/"walk-forward",
+            train_size=args.train_size, test_size=args.test_size, purge_size=args.purge_size,
+            initial_equity=D(args.initial_equity))
+        print(json.dumps({"output": str(root.resolve()), "metrics": result["global_oos"]["metrics"],
+                          "qualified": False, "strategy": "FROZEN_PRICE_PROTOTYPE_NO_AI"}, default=str))
+    elif args.command == "stress-replay":
+        from .stress import stress_paths
+        from hashlib import sha256
+        raw = Path(args.report).read_bytes()
+        source = json.loads(raw)
+        paths = [[D(x) for x in trade["returns"]] for trade in source["trade_paths"]]
+        result = stress_paths(paths, simulations=args.simulations, block_size=args.block_size,
+                              seed=args.seed, extra_cost_fraction=D(args.extra_cost_fraction))
+        result["source_report_sha256"] = sha256(raw).hexdigest()
+        result["source_type"] = source.get("type", "UNAVAILABLE")
+        output = Path(args.output)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        with output.open("x", encoding="utf-8") as stream:
+            json.dump(result, stream, default=str, indent=2)
+        print(json.dumps({"output": str(output.resolve()), "qualified": False}))
     elif args.command == "credentials-set":
         from .capital import save_credentials
         save_credentials()
         print("Demo credentials saved to Windows Credential Manager.")
+    elif args.command == "cost-status":
+        from .costs import CostLedger
+        store = Store(args.database)
+        try:
+            print(json.dumps(CostLedger(store).status(datetime.now(timezone.utc)), default=str))
+        finally:
+            store.close()
     else:
         from .capital import CapitalDemo, load_credentials
+        if args.command == "demo-reconcile" and args.async_http:
+            from .async_capital import AsyncCapitalDemo
+            from .reconciliation import inspect_demo_async
+            async def inspect():
+                client = AsyncCapitalDemo()  # 沒有 write_guard，任何訂單写入均被拒絕。
+                store = Store(args.database)
+                try:
+                    await client.login(load_credentials())
+                    print(json.dumps(await inspect_demo_async(client, store), ensure_ascii=False))
+                finally:
+                    await client.close()
+                    store.close()
+            asyncio.run(inspect())
+            return
         client = CapitalDemo()
         try:
             client.login(load_credentials())
+            if args.command == "demo-reconcile":
+                from .reconciliation import inspect_demo
+                store = Store(args.database)
+                try:
+                    print(json.dumps(inspect_demo(client, store), ensure_ascii=False))
+                finally:
+                    store.close()
+                return
+            if args.command == "demo-history":
+                from .history import download
+                result = download(client, "GOLD", datetime.fromisoformat(args.start), datetime.fromisoformat(args.end), args.output)
+                print(json.dumps({"rows": result["rows"], "output": args.output, "qualified": False}))
+                return
             data = client.market(args.epic) if args.epic else client.discover()
             path = Path(args.output)
             path.parent.mkdir(parents=True, exist_ok=True)

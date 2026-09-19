@@ -83,6 +83,26 @@ async def replay_csv(csv_path, contract_path, output, balance=D(10000)):
     bars = read_candles(csv_path)
     contract_data = json.loads(Path(contract_path).read_text(encoding="utf-8"))
     contract = Contract(contract_data["epic"], **{k: D(str(v)) for k, v in contract_data.items() if k != "epic"})
+    return await replay_candles(bars, contract, output, balance,
+        input_sha256=sha256(Path(csv_path).read_bytes()).hexdigest(),
+        contract_sha256=sha256(Path(contract_path).read_bytes()).hexdigest())
+
+
+async def replay_candles(bars, contract, output, balance=D(10000), *, warmup=(),
+                         input_sha256=None, contract_sha256=None):
+    """共用重播核心；warmup 只建立已收盤指標，不交易、不計入 OOS 損益。"""
+    if not bars or not isinstance(balance, D) or not balance.is_finite() or balance <= 0:
+        raise ValueError("Replay needs candles and positive initial equity")
+    previous_time = None
+    for candle in (*warmup, *bars):
+        if (not candle.bid.valid() or not candle.ask.valid()
+                or candle.bid.timestamp != candle.ask.timestamp
+                or candle.bid.timestamp.tzinfo is None
+                or candle.bid.timestamp.second or candle.bid.timestamp.microsecond
+                or any(getattr(candle.bid, k) > getattr(candle.ask, k) for k in ("open", "high", "low", "close"))
+                or (previous_time is not None and candle.bid.timestamp <= previous_time)):
+            raise ValueError("Invalid or overlapping replay/warmup candles")
+        previous_time = candle.bid.timestamp
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
     if (output / "events.db").exists():
@@ -91,8 +111,35 @@ async def replay_csv(csv_path, contract_path, output, balance=D(10000)):
     policy, broker = RiskPolicy(), PaperBroker(balance)
     engine = Engine(store, broker, contract, policy)
     history, equity_curve, trade_pnl = [], [balance], []
+    equity_points = [(bars[0].bid.timestamp-timedelta(minutes=1), balance)]
     trade_start = None
+    active_path, trade_paths = None, []
     previous = None
+    for candle in warmup:
+        if previous and candle.bid.timestamp-previous != timedelta(minutes=1):
+            history.clear()
+        history.append(candle.bid)
+        history = history[-1800:]
+        previous = candle.bid.timestamp
+    def mark(when, quote):
+        nonlocal trade_start, active_path
+        unrealized = D(0)
+        if broker.position:
+            p = broker.position
+            unrealized = (quote.exit(p.direction)-p.entry)*p.direction.sign*p.size*p.value_per_point
+        equity = broker.balance+unrealized
+        equity_curve.append(equity)
+        # 開窗資金與同時發生的成交價差必須分開保留，不覆蓋起始資金。
+        observed_at = when if when > equity_points[-1][0] else equity_points[-1][0]+timedelta(microseconds=1)
+        equity_points.append((observed_at, equity))
+        if active_path is not None:
+            active_path["returns"].append((equity-trade_start)/trade_start)
+            if broker.position is None:
+                active_path["closed_at"] = when.isoformat()
+                active_path["net_pnl"] = broker.balance-trade_start
+                trade_pnl.append(active_path["net_pnl"])
+                trade_paths.append(active_path)
+                trade_start, active_path = None, None
     try:
         for candle in bars:
             now = candle.bid.timestamp - timedelta(minutes=1)
@@ -113,41 +160,37 @@ async def replay_csv(csv_path, contract_path, output, balance=D(10000)):
             trailing = None
             if broker.position and m5:
                 trailing = min(b.low for b in m5[-3:]) if broker.position.direction == Direction.LONG else max(b.high for b in m5[-3:])
-            await engine.tick(now, open_quote, quality, signal, trailing)
+            await engine.tick(now, open_quote, quality, signal, trailing,
+                              add_confirmation=m5[-1] if had_position and m5 else None)
             if not had_position and broker.position:
                 trade_start = before
+                active_path = {"opened_at": now.isoformat(), "direction": str(signal.direction),
+                               "strategy_mode": str(signal.mode), "start_equity": before, "returns": [D(0)]}
+            mark(now, open_quote)
             # 不利端先觸發 stop。滑價仍由 PaperBroker 再加。
             fields = ("low", "high") if not broker.position or broker.position.direction == Direction.LONG else ("high", "low")
             for idx, field in enumerate((*fields, "close"), 1):
                 at = now + timedelta(seconds=idx * 15)
                 q = Quote(at, getattr(candle.bid, field), getattr(candle.ask, field))
                 await engine.tick(at, q, replace(quality, minutes_to_boundary=D(str((candle.boundary-at).total_seconds()/60))))
-                unrealized = D(0)
-                if broker.position:
-                    p = broker.position
-                    unrealized = (q.exit(p.direction) - p.entry) * p.direction.sign * p.size * p.value_per_point
-                equity_curve.append(broker.balance + unrealized)
-            if trade_start is not None and not broker.position:
-                trade_pnl.append(broker.balance - trade_start)
-                trade_start = None
+                mark(at, q)
             history.append(candle.bid)
             history = history[-1800:]
             previous = candle.bid.timestamp
+        last = bars[-1]
         if broker.position:
-            last = bars[-1]
             pnl = broker.close(Quote(last.bid.timestamp, last.bid.close, last.ask.close))
             store.emit("EXIT", reason="REPLAY_END", pnl=pnl)
-            if trade_start is not None:
-                trade_pnl.append(broker.balance - trade_start)
-            equity_curve.append(broker.balance)
+        mark(last.bid.timestamp, Quote(last.bid.timestamp, last.bid.close, last.ask.close))
         metrics = performance(trade_pnl, equity_curve)
         report = {"type": "BAR_REPLAY_ONLY", "qualified": False,
                   "limitations": ["OHLC_INTRABAR_ORDER_ASSUMED_ADVERSE_FIRST", "NO_AI_NEWS", "UNVALIDATED_PARAMETERS",
                                   "EXTERNAL_QUALITY_FLAGS_REQUIRE_POINT_IN_TIME_PROVENANCE"],
-                  "input_sha256": sha256(Path(csv_path).read_bytes()).hexdigest(),
-                  "contract_sha256": sha256(Path(contract_path).read_bytes()).hexdigest(),
+                  "input_sha256": input_sha256,
+                  "contract_sha256": contract_sha256,
                   "bars": len(bars), "metrics": metrics, "balance": broker.balance,
-                  "equity_curve": equity_curve, "events": store.events()}
+                  "equity_curve": equity_curve, "equity_points": equity_points,
+                  "trade_paths": trade_paths, "events": store.events()}
         (output / "report.json").write_text(json.dumps(report, default=str, ensure_ascii=False, indent=2), encoding="utf-8")
         return report
     finally:

@@ -70,6 +70,24 @@ class CapitalDemo:
     def market(self, epic):
         return self._request("GET", "/markets/" + quote(epic, safe=""))[0]
 
+    def session(self):
+        return self._request("GET", "/session")[0]
+
+    def preferences(self):
+        return self._request("GET", "/accounts/preferences")[0]
+
+    def positions(self):
+        return self._request("GET", "/positions")[0]
+
+    def working_orders(self):
+        return self._request("GET", "/workingorders")[0]
+
+    def confirmation(self, reference):
+        return self._request("GET", "/confirms/" + quote(reference, safe=""))[0]
+
+    def activity(self):
+        return self._request("GET", "/history/activity?lastPeriod=600&detailed=true")[0]
+
     def prices(self, epic, resolution="MINUTE", start=None, end=None):
         if resolution not in ("MINUTE", "MINUTE_5", "HOUR"):
             raise ValueError("Unsupported resolution")
