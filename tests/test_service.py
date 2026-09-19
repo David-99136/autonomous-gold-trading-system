@@ -146,3 +146,22 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(asyncio.CancelledError):
             await task
         self.assertTrue(cancelled.is_set())
+
+    async def test_silent_feed_locks_entries_and_cancels_analysis(self):
+        started, cancelled = asyncio.Event(), asyncio.Event()
+        async def analyze(frame):
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+        async def feed():
+            yield self.frame()
+            await started.wait()
+            await asyncio.Event().wait()
+        service = PaperService(self.engine, analyze, feed_timeout=.05, clock=lambda: self.now)
+        with self.assertRaisesRegex(RuntimeError, "PAPER_SERVICE_FAILED"):
+            await service.run(feed())
+        self.assertTrue(cancelled.is_set())
+        self.assertIsNone(self.engine.broker.position)
+        self.assertTrue(any(e["payload"].get("reason") == "FEED_SILENT" for e in self.store.events()))

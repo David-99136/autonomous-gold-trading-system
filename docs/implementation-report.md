@@ -406,3 +406,36 @@ Codex 結構決策、呼叫上限與 Engine 的 Signal 介面串接，仍限定 
 
 本輪最終驗證：183 項 unittest 全部通過；compileall 與 git diff --check 通過。
 真實 Codex 呼叫與模擬模型的 Paper 串接為兩項不同驗證，未宣稱已完成真實行情端到端交易。
+
+## 2026-09-19：即時報價接收與行情中斷處理
+
+目前實作依據 `.scratch/autonomous-gold-cfd-trading/spec.md` 的下列位置：
+
+| 規格位置 | 本輪工作 | 狀態 |
+| --- | --- | --- |
+| §6 Market Quality and timing，第 129 行 | GOLD WebSocket、券商時間戳、兩秒新鮮度及順序驗證 | 程式測試通過；開市報價待驗證 |
+| §10 Data and auditability，第 219 行 | JSONL 保存接收時間、券商時間、bid/ask、固定事件碼 | 診斷紀錄完成；完整決策證據鏈未完成 |
+| §11 Technology and security constraints，第 236 行 | 非同步訂閱、Demo session、固定主機、拒絕重新導向 | 接收器完成；常駐部署及程序權限隔離未完成 |
+| §12 Failure behavior，第 249 行 | 無行情逾時、清除進場訊號、取消分析工作 | 測試通過；券商恢復協調器未完成 |
+
+### 架構及關鍵程式
+
+- `AsyncCapitalDemo.quotes()` 在 Gateway 內使用 Demo session 訂閱，分析介面只接收 Quote。
+- `streaming.py` 的 `parse_quote()` 保留券商毫秒時間戳並轉為 UTC，拒絕過期、未來、重複／倒序、非法價格及錯誤商品；接收時間不會取代券商時間。
+- `stream_probe.py`／`demo-stream` 提供有期限的唯讀測試，JSONL 排他建立防止覆寫，僅保存允許的行情欄位與固定錯誤碼。
+- `PaperService.run()` 等待下一個 MarketFrame 最多兩秒。行情永久等待時，會記錄 FEED_SILENT、使進場訊號失效、取消分析並停止服務；不虛構平倉成交。
+- 新增 demo 依賴 `websockets==15.0.1`。使用 [Capital.com 官方 WebSocket 介面](https://open-api.capital.com/) 與 Demo REST 登入取得的 session，固定主機、停用代理並拒絕重新導向。
+
+### 驗證
+
+真實執行 `demo-stream --seconds 15 --output runtime/stream-probe-20260919-1.jsonl`：
+subscribed=true，但兩秒內無報價，回傳 STREAM_QUOTE_TIMEOUT、quote_count=0、entries_enabled=false。
+沒有下單。這證明訂閱通道可用，尚未證明開市報價與自動交易可用。
+
+新增 9 項測試涵蓋訂閱、拒絕、無行情、錯誤遮蔽、非法價格／商品、過期／未來／重複報價、
+非法訊息、拒絕重新導向及 Paper 行情中斷取消分析。
+完整 192 項 unittest、compileall、git diff --check 通過。
+
+下一步是開市報價驗證、H1/M5/M1 時間語義與品質接線，以及帳戶槓桿／每點价值核對。
+尚未完成 §8 券商部分平倉及修改停損、§9 正式訂單管理、§13 策略驗收。
+斷線後不自行重連或解除進場鎖；正式恢復流程仍需實作。
