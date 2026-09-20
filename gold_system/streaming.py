@@ -33,11 +33,11 @@ def decode(raw):
         raise FeedError("STREAM_INVALID_MESSAGE") from None
 
 
-def parse_quote(message, received_at, previous=None):
+def parse_quote(message, received_at, previous=None, *, epic="GOLD"):
     """券商毫秒時間戳保留原值；不能用接收時間把舊行情偽裝成新行情。"""
     try:
         data = message["payload"]
-        if (message["destination"] != "quote" or data["epic"] != "GOLD"
+        if (epic not in ("GOLD", "ETHUSD") or message["destination"] != "quote" or data["epic"] != epic
                 or data["product"] != "CFD" or type(data["timestamp"]) is not int):
             raise ValueError()
         stamp = datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(milliseconds=data["timestamp"])
@@ -56,12 +56,14 @@ def parse_quote(message, received_at, previous=None):
 
 
 async def gold_quotes(headers, *, on_event=None, connector=NoRedirectConnect,
-                      clock=None, silence_timeout=2):
+                      clock=None, silence_timeout=2, epic="GOLD"):
     """一個連線世代；無行情兩秒即結束，不自動重連或解除進場鎖。
 
     呼叫者必須關閉 iterator。訂閱成功只代表通道正常，不代表市場可交易。
     即使不斷收到 ping，也不能延長最後一筆行情的存活期限。
     """
+    if epic not in ("GOLD", "ETHUSD"):
+        raise ValueError("Unsupported diagnostic instrument")
     if not 0 < silence_timeout <= 2:
         raise ValueError("Quote silence timeout must be in (0, 2]")
     if any(not isinstance(headers.get(k), str) or not headers[k]
@@ -74,10 +76,10 @@ async def gold_quotes(headers, *, on_event=None, connector=NoRedirectConnect,
         async with connector(STREAM_URL, proxy=None, open_timeout=10, close_timeout=2,
                              max_size=65536, max_queue=4, compression=None) as ws:
             await asyncio.wait_for(ws.send(json.dumps(dict(auth, destination="marketData.subscribe",
-                correlationId="gold-1", payload={"epics": ["GOLD"]}))), 2)
+                correlationId="gold-1", payload={"epics": [epic]}))), 2)
             ack = decode(await asyncio.wait_for(ws.recv(), 5))
             if (ack.get("destination") != "marketData.subscribe" or ack.get("correlationId") != "gold-1"
-                    or ack.get("payload", {}).get("subscriptions", {}).get("GOLD") != "PROCESSED"):
+                    or ack.get("payload", {}).get("subscriptions", {}).get(epic) != "PROCESSED"):
                 raise FeedError("STREAM_SUBSCRIPTION_REJECTED")
             emit("STREAM_SUBSCRIBED")
             loop = asyncio.get_running_loop()
@@ -91,7 +93,7 @@ async def gold_quotes(headers, *, on_event=None, connector=NoRedirectConnect,
                 except TimeoutError:
                     raise FeedError("STREAM_QUOTE_TIMEOUT") from None
                 if message.get("destination") == "quote":
-                    value = parse_quote(message, clock(), previous)
+                    value = parse_quote(message, clock(), previous, epic=epic)
                     previous, last_quote = value.timestamp, loop.time()
                     yield value
                 elif message.get("destination") != "ping":

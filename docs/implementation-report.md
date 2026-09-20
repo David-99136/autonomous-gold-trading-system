@@ -439,3 +439,42 @@ subscribed=true，但兩秒內無報價，回傳 STREAM_QUOTE_TIMEOUT、quote_co
 下一步是開市報價驗證、H1/M5/M1 時間語義與品質接線，以及帳戶槓桿／每點价值核對。
 尚未完成 §8 券商部分平倉及修改停損、§9 正式訂單管理、§13 策略驗收。
 斷線後不自行重連或解除進場鎖；正式恢復流程仍需實作。
+
+## 2026-09-20：以 ETHUSD Demo 驗證共用交易功能
+
+依使用者授權，以以太幣驗證黃金策略以外的子任務，對應規格 §6、§8–10 及部分 §12。
+詳細計畫為 `.scratch/eth-demo-validation/spec.md`，實測證據摘要見
+[ETHUSD Demo 驗證](research/eth-demo-validation-20260920.md)。
+
+完成實際 BUY 0.002、收緊保證停損、SELL 0.001 淨額減倉及 DELETE 剩餘部位。
+每步核對确认與持倉；結束持倉／掛單均 0，再登入核對為 SNAPSHOT_MATCHED。
+減倉的 affectedDeals 為空，但持倉由 0.002 降至 0.001，已將此真實回應模式加入回歸測試。
+
+為定位串流故障，按 diagnosing-bugs 的取樣流程比對本機／券商時間及報價時間戳，
+確認本機落後造成合法報價被視為未來報價。新增 BrokerClock 三次取樣及誤差界線後，
+重新執行原診斷命令，在 15 秒收到 57 筆有效行情；不更改 OS 時間、不放寬兩秒門檻。
+
+程式新增 `clock_sync.py`、獨立 `eth_experiment.py`，唯讀串流擴充 ETHUSD allowlist。
+正式 GOLD 進場商品限制仍不變；實驗需明確旗標，固定微量、空帳戶前置條件，
+送單意圖先落盤，寫入不重試，最後僅清理本次部位。
+
+新增 7 項測試，完整 199 項 unittest 通過，compileall 與 diff --check 通過。
+未宣稱驗證黃金策略、黃金契約、停損實際觸發、部分平倉成本總帳或持倉中斷線恢復。
+本輪不是持續自動交易，亦不累計 GOLD 的 30 日驗收；修改尚未推送 GitHub。
+
+## 2026-09-20：登入頻率與日終對帳需求修訂
+
+使用者要求取消逐筆交易後重新登入，改在每日交易限制到達後重新登入對帳。
+檢查目前程式後確認：ETH 實驗只在啟動時登入一次，逐筆確認／持倉查詢均沿用 session；
+上次全平後的新登入是另外執行的單次驗證命令，不是自動交易迴圈中的既有行為。
+
+已將正常交易沿用 session、逐筆即時核對、日限制後新 session 對帳的規則寫入規格 §10。
+使用者隨後明確確認為 10% 已實現日虧損硬熔斷；3% 軟熔斷停止新進場，但不觸發例行重新登入。
+認證失效／程序重啟等必要恢復不受日終登入時機限制；換 session 不應先於緊急減風險。
+本輪只更新文件，尚未實作日終協調器；無交易、未切换分析供應商。
+
+本機編輯器檢查：VS Code 列出 Python、Pylance、debugpy、Python Environments、PowerShell
+及 rainbow-csv，未見 Gemini／Code Assist 外掛；目前 PATH 亦未找到 gemini 指令。
+另在 AppData/Local/Programs/antigravity 找到 Antigravity.exe，可能是使用者所指的 Gemini 工具。
+此檢查只證明程式存在，未驗證它目前選用的模型、登入或可用額度，未讀取認證檔。
+目前模型 adapter 為 Codex CLI；新增 Skill 不能自動把該 adapter 改成 Gemini。

@@ -66,6 +66,7 @@ def main():
     codex_check.add_argument("--model", help="Optional explicit Codex model; omitted uses CLI default")
     stream = sub.add_parser("demo-stream", help="Read-only GOLD WebSocket probe; never places orders")
     stream.add_argument("--seconds", type=int, default=15)
+    stream.add_argument("--epic", choices=("GOLD", "ETHUSD"), default="GOLD")
     stream.add_argument("--output", required=True, help="New local JSONL file; excludes credentials")
     discovery = sub.add_parser("demo-discover", help="Demo login and read market data only")
     discovery.add_argument("--epic", help="Inspect a previously discovered epic")
@@ -97,7 +98,7 @@ def main():
         if not 1 <= args.seconds <= 300:
             parser.error("seconds must be between 1 and 300")
         from .stream_probe import capture_quotes
-        print(json.dumps(asyncio.run(capture_quotes(args.output, args.seconds))))
+        print(json.dumps(asyncio.run(capture_quotes(args.output, args.seconds, epic=args.epic))))
     elif args.command == "codex-check":
         from .codex_analysis import CodexAnalysis
         report = asyncio.run(CodexAnalysis(model=args.model).select([], {"evidence_eligible": False,
