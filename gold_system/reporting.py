@@ -14,7 +14,7 @@ def timestamp(value):
     return parsed
 
 
-def summarize(database, start, end, mode):
+def summarize(database, start, end, mode, account_hash=None):
     start, end = timestamp(start), timestamp(end)
     if start >= end or mode not in ("PAPER", "DEMO"):
         raise ValueError("REPORT_INVALID_WINDOW_OR_MODE")
@@ -23,6 +23,7 @@ def summarize(database, start, end, mode):
     db = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)
     counts = Counter()
     pnl, segments, skipped = Decimal(0), 0, 0
+    accounting = None
     try:
         for recorded, kind, raw in db.execute("SELECT time,kind,payload FROM events ORDER BY id"):
             payload = json.loads(raw)
@@ -48,6 +49,17 @@ def summarize(database, start, end, mode):
                     raise ValueError("REPORT_INVALID_PNL")
                 pnl += value
                 segments += 1
+        if account_hash is not None:
+            from .accounting import AccountingLedger
+            try:
+                receipt = AccountingLedger(db, initialize=False).verified_period(
+                    mode=mode, account_hash=account_hash, start=start.isoformat(), end=end.isoformat())
+                # 不輸出帳戶／成交指紋，僅回報已對帳區間的金額及分段數。
+                accounting = dict(status="MATCHED", segment_count=receipt["segment_count"],
+                                  realized_net_pnl=receipt["net_pnl"], extra_broker_fees=receipt["extra_fees"],
+                                  opening_equity=receipt["opening_equity"])
+            except Exception:
+                accounting = dict(status="UNVERIFIED", realized_net_pnl=None)
     finally:
         db.close()
     return {
@@ -55,6 +67,8 @@ def summarize(database, start, end, mode):
         "start_inclusive": start.isoformat(), "end_exclusive": end.isoformat(),
         "time_basis": "simulated_at" if mode == "PAPER" else "event_recorded_at_not_fill_time",
         "event_counts": dict(sorted(counts.items())),
+        "event_counts_scope": "database_wide_not_account_filtered",
+        "accounting": accounting,
         "skipped_other_time_basis_rows": skipped,
         "paper_exit_segments": segments if mode == "PAPER" else None,
         "paper_recorded_exit_pnl": str(pnl) if mode == "PAPER" and segments else None,
@@ -85,8 +99,8 @@ def render(report):
     return "\n".join(lines) + "\n"
 
 
-def write_report(database, start, end, mode, output):
-    report = summarize(database, start, end, mode)
+def write_report(database, start, end, mode, output, account_hash=None):
+    report = summarize(database, start, end, mode, account_hash=account_hash)
     target = Path(output)
     target.parent.mkdir(parents=True, exist_ok=True)
     # x 模式保留既有報告，避免覆寫先前核對證據。

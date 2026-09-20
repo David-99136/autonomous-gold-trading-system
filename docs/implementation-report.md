@@ -1,5 +1,15 @@
 # 第一階段實作報告
 
+## 2026-09-20：分析呼叫持久化保護（工作包 4）
+
+新增 `analysis_journal.py`，接線至 `CodexFrameAnalysis`：原子預留、跨重啟上限、
+精確輸入去重與請求模型／prompt／策略版本綁定。取消及不明結果不退還次數，
+不自動重送或重設預算。結果僅存摘要、token 與延遲；美元成本及信心校準仍未知。
+修正稽核遮蔽將合法 token 整數統計一併隱藏的問題，秘密字串仍遮蔽。
+新增 11 項測試，完整 283 項通過；既有服務 mock 補齊真實 parser 要求的快取 token 欄位。
+完整訊號契約、模型比較與策略驗證尚待完成，不將工作包 4 宣稱全部驗收。
+說明見 `docs/analysis-checkpoint.md`。本輪無模型／券商呼叫，未下單或推送。
+
 日期：2026-09-06。版本：0.1。範圍：可執行離線原型與 Demo 資料探測。
 
 ## 已實作
@@ -461,6 +471,25 @@ subscribed=true，但兩秒內無報價，回傳 STREAM_QUOTE_TIMEOUT、quote_co
 新增 7 項測試，完整 199 項 unittest 通過，compileall 與 diff --check 通過。
 未宣稱驗證黃金策略、黃金契約、停損實際觸發、部分平倉成本總帳或持倉中斷線恢復。
 本輪不是持續自動交易，亦不累計 GOLD 的 30 日驗收；修改尚未推送 GitHub。
+
+## 2026-09-20：已收棒 M1→M5/H1 接線（工作包 3）
+
+新增 `timeframes.py`：GOLD 專用、bid/ask 分開、Point-in-time 接收時間過濾、
+有限歷史與修訂衝突鎖定；重用既有 aggregate，輸出 PaperService 的 MarketFrame。
+不填補缺棒或虛構 ask，不放寬上游品質。H1 只傳連續尾段，避免已修復後仍被早期缺口阻擋。
+新增 14 項測試，完整 272 項通過，compileall／diff 檢查通過。
+未進行券商呼叫、策略驗證或下單；原始時間語義與正式 feed adapter 仍未接線。
+見 `docs/multiframe-feed.md` 的架構及星期一驗證缺口。
+
+## 2026-09-20：帳務彙總與每日熔斷核心（工作包 1、2）
+
+新增 `accounting.py`、`daily_control.py` 與 25 項測試；完整 258 項通過，compileall／diff 通過。
+費用補證與權威清單／淨額核對後產生 receipt，晚到證據使 receipt 失效；日報唯讀接線。
+3% 不重新登入，10% 先封鎖新倉、確認減風險再换 session 對帳；流程跨重啟持久化，
+未知結果不自動重跑，完成仍保持硬鎖。既有 Engine／EntryGuard 讀取額外日鎖鍵。
+修正 Capital adapter 的帳戶指紋，統一為既有 reconciliation 使用的 SHA-256(raw accountId)。
+本輪沒有券商或模型呼叫、沒有下單；實際帳務、交易日／日初權益及正式回呼仍待驗證。
+架構、程式說明與尚缺證據見 `docs/daily-accounting-control.md`。未改動 `close_eth_demo.py`。
 
 ## 2026-09-20：ETH Demo 唯讀歷史核對與 UTC 佐證
 

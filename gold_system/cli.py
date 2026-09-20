@@ -96,6 +96,7 @@ def main():
     daily.add_argument("--start", required=True, help="Inclusive ISO timestamp with UTC offset")
     daily.add_argument("--end", required=True, help="Exclusive ISO timestamp with UTC offset")
     daily.add_argument("--mode", required=True, choices=("PAPER", "DEMO"))
+    daily.add_argument("--account-hash", help="Optional account SHA-256 for verified settlement totals; never a raw account ID")
     daily.add_argument("--output", required=True, help="New Markdown file; never overwrite")
     args = parser.parse_args()
     if args.command == "replay":
@@ -103,7 +104,7 @@ def main():
     elif args.command == "daily-report":
         from .reporting import write_report
         try:
-            result = write_report(args.database, args.start, args.end, args.mode, args.output)
+            result = write_report(args.database, args.start, args.end, args.mode, args.output, account_hash=args.account_hash)
         except Exception:
             # 壞資料的例外可能含原始 payload，對使用者只顯示固定錯誤。
             parser.error("REPORT_FAILED: check database, offset-aware window and unused output path")

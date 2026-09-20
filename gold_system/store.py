@@ -24,7 +24,9 @@ class Store:
 
         def clean(value):
             if isinstance(value, dict):
-                return {k: "[REDACTED]" if any(s in k.lower() for s in sensitive) else clean(v)
+                return {k: (v if k in ("input_tokens", "cached_input_tokens", "output_tokens")
+                            and type(v) is int and v >= 0 else "[REDACTED]")
+                        if any(s in k.lower() for s in sensitive) else clean(v)
                         for k, v in value.items()}
             if isinstance(value, list):
                 return [clean(v) for v in value]
@@ -85,6 +87,7 @@ class Store:
     def entries_stopped(self):
         # 缺值代表尚未下停止命令；壞資料或讀取失敗不能被當作允許新風險。
         try:
-            return self.get("operator_stop_new", False) is not False
+            return (self.get("operator_stop_new", False) is not False
+                    or self.get("daily_new_entries_blocked", False) is not False)
         except Exception:
             return True
