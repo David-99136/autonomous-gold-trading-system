@@ -1,4 +1,5 @@
 import copy
+from hashlib import sha256
 import unittest
 from decimal import Decimal
 from unittest.mock import Mock
@@ -23,6 +24,7 @@ class CapitalSettlementTests(unittest.TestCase):
         self.assertEqual(result["realized_pnl"], Decimal("-0.00146"))
         self.assertIsNone(result["extra_fee"])
         self.assertNotIn("canary", repr(result))
+        self.assertEqual(result["account_hash"], sha256(b"account-canary").hexdigest())
 
     def test_observed_naive_time_is_rejected_not_assumed_utc(self):
         self.e["confirmation"]["date"] = "2026-09-20T00:09:37.757"

@@ -1,5 +1,6 @@
 """使用本機已登入的 Codex CLI 選擇候選訊號；不持有 Capital.com 認證。"""
 import asyncio
+import copy
 import json
 import os
 import shutil
@@ -137,14 +138,20 @@ class CodexFrameAnalysis:
     """PaperService 的分析 callback：證據 → Codex 選擇 → 原候選 Signal。
 
     candidates(frame) 與 evidence(frame) 由本機管線提供，模型輸出無法改下單參數。
-    max_calls 是本次服務生命週期的明確上限；不代替帳戶剩餘額度與月度成本限制。
+    max_calls 是資料庫／budget_scope 的持久化上限；不代替帳戶額度與月度成本限制。
     """
-    def __init__(self, runner, candidates, evidence, store, *, max_calls, clock):
+    def __init__(self, runner, candidates, evidence, store, *, max_calls, clock, budget_scope="paper-analysis"):
         if type(max_calls) is not int or max_calls <= 0:
             raise ValueError("Explicit positive Codex call limit required")
         self.runner, self.candidates, self.evidence, self.store = runner, candidates, evidence, store
-        self.max_calls, self.clock, self.calls = max_calls, clock, 0
+        from .analysis_journal import AnalysisJournal
+        self.max_calls, self.clock = max_calls, clock
+        self.journal = AnalysisJournal(store, scope=budget_scope, max_calls=max_calls)
         self._lock = asyncio.Lock()
+
+    @property
+    def calls(self):
+        return self.journal.used
 
     async def __call__(self, frame):
         from datetime import timedelta
@@ -153,7 +160,7 @@ class CodexFrameAnalysis:
         async with self._lock:
             now = self.clock()
             candidates = tuple(self.candidates(frame))
-            evidence = await self.evidence(frame)
+            evidence = copy.deepcopy(await self.evidence(frame))
             def abstain(reason):
                 key = sha256((now.isoformat()+reason).encode()).hexdigest()
                 version = candidates[0].version if candidates else "prototype-v1-unvalidated"
@@ -165,10 +172,19 @@ class CodexFrameAnalysis:
                 return abstain("CODEX_CALLS_PAUSED_OR_EXHAUSTED")
             if any(not s.created <= now < s.expires for s in candidates):
                 return abstain("CANDIDATE_EXPIRED_OR_FUTURE")
-            self.calls += 1  # 逾時也消耗一次限額，不能自動重試。
+            key = self.journal.reserve(frame=frame, candidates=candidates, evidence=evidence,
+                                       model=self.runner.model, prompt_version=PROMPT_VERSION)
+            if key is None:
+                return abstain("ANALYSIS_DUPLICATE_OR_BUDGET_EXHAUSTED")
             self.store.emit("CODEX_ANALYSIS_REQUESTED", call_number=self.calls,
-                            prompt_version=PROMPT_VERSION, requested_model=self.runner.model)
-            result = await self.runner.select(candidates, evidence)
+                            prompt_version=PROMPT_VERSION, requested_model=self.runner.model, input_hash=key)
+            started = time.monotonic()
+            try:
+                result = await self.runner.select(candidates, evidence)
+                self.journal.finish(key, result, elapsed_seconds=time.monotonic() - started)
+            except BaseException:
+                self.journal.failed(key)
+                raise
             self.store.emit("CODEX_ANALYSIS_COMPLETED", **result)
             if self.store.entries_stopped():
                 return abstain("OPERATOR_STOP_NEW")

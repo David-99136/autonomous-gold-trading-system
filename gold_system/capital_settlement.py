@@ -109,7 +109,8 @@ def normalize_full_close(*, session_before, session_after, confirmation,
     evidence = {k: c[k] for k in ("dealReference", "dealId", "epic", "dealStatus", "status",
                                 "date", "size", "profit", "profitCurrency", "affectedDeals")}
     evidence["corroborated_utc"] = occurred.astimezone(timezone.utc).isoformat()
-    return dict(mode="DEMO", account_hash=_fingerprint(account),
+    # 與 reconciliation.evaluate／history probe 使用相同帳戶指紋規則。
+    return dict(mode="DEMO", account_hash=sha256(account.encode()).hexdigest(),
                 fill_hash=_fingerprint([expected_reference, expected_deal_id]),
                 trade_hash=_fingerprint(expected_deal_id), evidence_hash=_fingerprint(evidence),
                 occurred_at=occurred, quantity=size, realized_pnl=profit, extra_fee=None)

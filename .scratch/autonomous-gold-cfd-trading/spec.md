@@ -237,7 +237,12 @@ these are recovery actions rather than routine post-trade logins.
 
 Implementation status: normal per-trade relogin is not present in the current prototype.
 The extra fresh-session check after the ETH experiment was a one-off validation command.
-The persistent daily reconciliation coordinator is not yet implemented.
+The persistent daily reconciliation coordinator core is implemented in `daily_control.py`
+with offline callback tests (2026-09-20). `accounting.py` requires a complete authoritative fill
+manifest, known fees, matching net P&L and fixed opening equity before producing a valid receipt.
+Late ledger evidence invalidates that receipt. Existing new-entry guards now honor its persistent lock.
+Authoritative accounting inputs, account trading-day boundaries, production Gateway callbacks,
+and recovery/unlock operations are not yet connected or qualified; automatic trading remains disabled.
 
 Capital.com venue-native bid/offer history and streaming quotes are the primary execution record. Third-party prices may enrich research but cannot independently unlock Live.
 

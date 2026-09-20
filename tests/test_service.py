@@ -60,7 +60,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_codex_bridge_to_trading_engine_with_mock_model(self):
         runner = SimpleNamespace(model="fixture", select=AsyncMock(return_value={
             "candidate_id": self.signal.signal_id, "actual_usd": None, "confidence": 0.8,
-            "reason_code": "EVIDENCE_SUPPORTS", "usage": {"input_tokens": 20, "output_tokens": 10}}))
+            "reason_code": "EVIDENCE_SUPPORTS", "usage": {"input_tokens": 20, "cached_input_tokens": 0, "output_tokens": 10}}))
         bridge = CodexFrameAnalysis(runner, lambda _: (self.signal,),
             AsyncMock(return_value={"evidence_eligible": True}), self.store, max_calls=1, clock=lambda: self.now)
         service = PaperService(self.engine, bridge, analysis_timeout=46, clock=lambda: self.now)
