@@ -218,6 +218,27 @@ Performance targets:
 
 ## 10. Data and auditability
 
+### Session reuse and daily reconciliation — user update 2026-09-20
+
+Reuse the existing authenticated broker session during normal trading. Each order still requires
+confirmation and reconciliation of fills, remaining size, stops, and realized P&L through that session;
+finishing a trade is not a reason to log in again.
+
+When daily realized loss reaches the 10% hard-circuit-breaker limit, block new entries and perform a fresh-session
+reconciliation at a serialized session boundary. Do not interrupt required position management or
+hard-circuit-breaker risk reduction merely to replace the session. Complete the daily reconciliation
+once per account/trading day, with durable status so a restart cannot repeat it as a per-trade action.
+
+The user confirmed 10% on 2026-09-20. The 3% realized-loss soft breaker still stops new entries but
+does not trigger this routine fresh-session reconciliation. There is no daily trade-count limit.
+Session expiry, authentication failure, process
+restart, and recovery from uncertain broker state may still require earlier reauthentication;
+these are recovery actions rather than routine post-trade logins.
+
+Implementation status: normal per-trade relogin is not present in the current prototype.
+The extra fresh-session check after the ETH experiment was a one-off validation command.
+The persistent daily reconciliation coordinator is not yet implemented.
+
 Capital.com venue-native bid/offer history and streaming quotes are the primary execution record. Third-party prices may enrich research but cannot independently unlock Live.
 
 Every decision cycle records:

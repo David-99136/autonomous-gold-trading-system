@@ -23,13 +23,16 @@ class PaperService:
     同時最多一個分析請求。忙碌時只保留最新行情，避免把舊行情排成長佇列。
     run 結束會取消分析並保留稽核；不宣稱已平倉，重啟仍依 Engine 的恢復鎖處理。
     """
-    def __init__(self, engine, analysis, *, analysis_timeout=2, clock=None):
+    def __init__(self, engine, analysis, *, analysis_timeout=2, feed_timeout=2, clock=None):
         if not isinstance(engine.broker, PaperBroker):
             raise ValueError("This service supports PaperBroker only")
         if type(analysis_timeout) not in (int, float) or not 0 < analysis_timeout <= 60:
             raise ValueError("Analysis timeout must be positive and at most 60 seconds")
         self.engine, self.analysis = engine, analysis
         self.analysis_timeout = analysis_timeout
+        if type(feed_timeout) not in (int, float) or not 0 < feed_timeout <= 2:
+            raise ValueError("Feed timeout must be in (0, 2]")
+        self.feed_timeout = feed_timeout
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self._pending = asyncio.Queue(maxsize=1)
         self._signal = None
@@ -122,7 +125,15 @@ class PaperService:
         worker = asyncio.create_task(self._analyze())
         self.engine.store.emit("PAPER_SERVICE_STARTED")
         try:
-            async for frame in feed:
+            iterator = aiter(feed)
+            while True:
+                try:
+                    frame = await asyncio.wait_for(anext(iterator), self.feed_timeout)
+                except StopAsyncIteration:
+                    break
+                except TimeoutError:
+                    self._invalidate("FEED_SILENT")
+                    raise
                 await self._frame(frame)
                 await asyncio.sleep(0)  # 即使 feed 為記憶體資料也讓分析工作有機會執行。
         except asyncio.CancelledError:

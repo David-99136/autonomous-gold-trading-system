@@ -164,3 +164,15 @@ Demo 獨立風控每次驗證時都讀取此狀態；既有停損與時間退出
 已提供本機 Codex CLI 接入與非同步 Paper 服務協調層，並完成一次實際 ChatGPT 登入
 呼叫的 `NO_TRADE` 測試。功能、架構、測試指令與尚未接線項目見
 [Codex 分析代理接入](docs/codex-analysis-setup.md)。連線測試會使用 Codex 額度。
+
+### Demo 即時報價診斷
+
+安裝 demo 選用依賴後，可用既有 Windows Demo 憑證進行唯讀訂閱：
+
+```powershell
+.\.venv\Scripts\python.exe -m gold_system demo-stream --seconds 15 --output runtime/stream-probe.jsonl
+```
+
+輸出檔必須尚不存在。訂閱成功不代表市場可交易；兩秒沒有有效報價即結束。
+行情過期、未來、重複或倒序均拒絕，不自動重連解鎖。此命令沒有下單功能。
+最新規格位置與驗證進度見 [更新日誌](docs/implementation-report.md)。

@@ -11,7 +11,7 @@ dependencies = []
 
 [project.optional-dependencies]
 credentials = ["keyring>=25,<26"]
-demo = ["httpx==0.28.1", "keyring>=25,<26"]
+demo = ["httpx==0.28.1", "keyring>=25,<26", "websockets==15.0.1"]
 
 [project.scripts]
 gold-system = "gold_system.cli:main"

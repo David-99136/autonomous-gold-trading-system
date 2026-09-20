@@ -104,6 +104,11 @@ class AsyncCapitalDemo:
     async def session(self):
         return (await self._request("GET", "/session"))[0]
 
+    def quotes(self, *, on_event=None, epic="GOLD", clock=None):
+        """僅 Demo login 的 session 可用；模型只收到 Quote，沒有 token。"""
+        from .streaming import gold_quotes
+        return gold_quotes(self._headers, on_event=on_event, epic=epic, clock=clock)
+
     async def preferences(self):
         return (await self._request("GET", "/accounts/preferences"))[0]
 
