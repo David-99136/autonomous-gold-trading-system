@@ -309,7 +309,18 @@ No manual cherry-picking or retroactive deletion is allowed. A material model, p
 
 Immediate notification channels for the first release: local console and email.
 
-Immediate events include open, add-on, partial profit, close, reject, excessive slippage, data loss, agent/broker disconnect, circuit breaker, Recovery Locked, and execution-mode change. Routine analysis and `NO_TRADE` decisions are logged and summarized rather than pushed individually.
+Daily summary notification time: 22:00 Asia/Taipei, confirmed by the user on 2026-09-20.
+This is the notification schedule, not a definition of the broker/risk trading-day boundary.
+If trading or accounting remains incomplete at that time, label the summary provisional;
+do not claim the trading day has ended or positions are flat. The scheduler is not yet connected.
+
+User-facing trading chat uses quiet reporting (user update, 2026-09-20): confirmed opens/add-ons, accepted working orders (clearly distinguished from fills), partial/full closes, cancellations, and one daily summary. Routine analysis, `NO_TRADE`, ordinary rejections, successful heartbeats/reconciliation and routine stop amendments are logged rather than individually narrated.
+
+Safety exceptions remain immediate: uncertain order outcomes, unverified protective stops, excessive slippage, data loss or disconnect affecting safe execution, circuit breakers, Recovery Locked, execution-mode changes, failed risk reduction, and required user authorization. Never report submission as confirmed execution or suppress an actionable incident to save tokens. Preserve full audit records and per-order reconciliation.
+
+Use `skills/trade-quiet-report/SKILL.md` for the AI communication policy. The skill alone does not implement a notification scheduler, durable delivery deduplication, or accounting aggregation. Daily summaries use the configured trading-day boundary and timezone, mark missing costs/metrics as unknown, and link the full report. No notification-only model calls for unchanged state.
+
+Gold strategy validation is deferred to Monday, 2026-09-21, at the user's request. Non-strategy reporting and infrastructure work may proceed; this date does not authorize automatic startup or waive validation gates.
 
 The daily report includes realized P&L, maximum intraday floating loss, costs, slippage, win rate, average R, Profit Factor, rejected/missed orders, `NO_TRADE` reasons, AI cost, version information, and strategy/direction/source attribution.
 

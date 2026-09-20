@@ -91,9 +91,23 @@ def main():
     stress.add_argument("--block-size", type=int, default=5)
     stress.add_argument("--seed", type=int, default=0)
     stress.add_argument("--extra-cost-fraction", default="0")
+    daily = sub.add_parser("daily-report", help="Offline provisional audit summary; no broker/model calls")
+    daily.add_argument("--database", required=True)
+    daily.add_argument("--start", required=True, help="Inclusive ISO timestamp with UTC offset")
+    daily.add_argument("--end", required=True, help="Exclusive ISO timestamp with UTC offset")
+    daily.add_argument("--mode", required=True, choices=("PAPER", "DEMO"))
+    daily.add_argument("--output", required=True, help="New Markdown file; never overwrite")
     args = parser.parse_args()
     if args.command == "replay":
         asyncio.run(replay(args.output))
+    elif args.command == "daily-report":
+        from .reporting import write_report
+        try:
+            result = write_report(args.database, args.start, args.end, args.mode, args.output)
+        except Exception:
+            # 壞資料的例外可能含原始 payload，對使用者只顯示固定錯誤。
+            parser.error("REPORT_FAILED: check database, offset-aware window and unused output path")
+        print(json.dumps(result, ensure_ascii=False))
     elif args.command == "demo-stream":
         if not 1 <= args.seconds <= 300:
             parser.error("seconds must be between 1 and 300")
