@@ -462,6 +462,61 @@ subscribed=true，但兩秒內無報價，回傳 STREAM_QUOTE_TIMEOUT、quote_co
 未宣稱驗證黃金策略、黃金契約、停損實際觸發、部分平倉成本總帳或持倉中斷線恢復。
 本輪不是持續自動交易，亦不累計 GOLD 的 30 日驗收；修改尚未推送 GitHub。
 
+## 2026-09-20：ETH Demo 唯讀歷史核對與 UTC 佐證
+
+新增 `account_history_probe.py`：固定 Demo、登入一次、僅 GET history／session，
+同帳戶 USD 檢查、最多一天範圍、秘密欄位過濾及本機排他寫入。
+實際查詢 00:09–00:11 UTC，取得 2 筆 transactions 與 7 筆 activities，訂單送出 0。
+已實測最後全平與活動 dateUTC 多欄位唯一匹配；reference 重用，故不只靠 reference 配對。
+新增 UTC 佐證分支，未將任意無時區 date 預設成 UTC。
+兩筆交易 size=0.0 不作精確損益；完整帳務仍待減半損益及費用證據，未將本次資料入帳。
+原始資料保留 `runtime/eth-history-20260920.json`，不推送 GitHub。
+本輪新增 4 項歷史探測測試及 3 項 UTC 佐證測試，完整 233 項通過，compileall／diff 檢查通過。
+
+## 2026-09-20：Capital Demo 全平帳務 adapter（§9–10）
+
+新增 `capital_settlement.py` 與 7 項測試，驗證確認、請求識別、帳戶、幣別、數量及前後部位，
+只將通過者交給原子帳本。錯誤使用固定代碼，不輸出原始識別或秘密。
+本輪唯讀查阅官方 API 及既有 ETH runtime 白名單欄位，沒有登入券商或交易。
+實測減半無 profit、最後全平有單段 profit 且 date 無 offset；這些資料不能自動轉成完整交易損益。
+因此時間語義、部分平倉盈虧與完整費用仍是第 1 階段證據缺口，未宣稱自動帳務接通。
+完整 226 項測試通過，compileall／diff 檢查通過。詳見 `docs/capital-settlement-adapter.md`。
+
+## 2026-09-20：成交分段與通知原子入庫（§10、12、14）
+
+新增 `settlement.py`：`canonical_close` 驗證模式、UTC 時間、Decimal 與資料指紋，
+`record_close` 在同一 SQLite transaction 寫入平倉分段與通知。
+相同模式／帳戶／成交指紋只入帳一次；相同鍵內容衝突拒絕，不覆寫既有證據。
+通知以原子 claim 保證單一 worker 取得；已送／結果不明不重送，確定未投遞才可重試。
+重啟保留 IN_FLIGHT，尚待通道層核對；不宣稱外部送達 exactly-once。
+缺額外費用維持未知，部分平倉保留分段與交易指紋，不自行計完整交易勝率。
+本層不驗證券商來源真實性，上游正規化／對帳 adapter、日報與 SMTP 接線仍待完成。
+新增 10 項離線測試，完整 219 項通過，compileall／diff 檢查通過；沒有券商、模型呼叫或策略交易。
+使用者確認每日摘要為 Asia/Taipei 22:00；已記入規格，尚未啟動排程，未混用為風控交易日邊界。
+剩餘工作包與外部門檻見 `docs/remaining-roadmap.md`。
+
+## 2026-09-20：本機稽核日報第一階段（§14）
+
+新增 `reporting.py`、`daily-report` CLI 與 10 項測試，完整 209 項通過。
+SQLite 唯讀輸入 → 模式／時區明確的事件摘要 → 固定 Markdown 模板，無券商／模型呼叫。
+區分 Paper 平倉分段損益與尚未知的 Demo 帳务；不把部分平倉算成完整交易，
+不把空事件當作零損益或空倉。既有輸出不覆寫；未知指標保留待核對。
+初次測試發現測試輔助連線未關閉導致 Windows 暫存清理失敗，已明確關閉後通過。
+使用與架構見 `docs/local-daily-report.md`。完整帳本、排程與通知投遞仍待完成；
+黃金策略驗證維持 2026-09-21。本輪不執行既有 `close_eth_demo.py`、不下單或推送。
+
+## 2026-09-20：精簡交易回報技能（§14）
+
+- 新增 `skills/trade-quiet-report/SKILL.md`，並同步主規格 §14、readiness 與工作規格。
+- 技能控制使用者對話，不修改 Analysis Agent → Trading Agent → Order Gateway 執行架構。
+- 開單／平倉／撤單必須有確認證據；一般分析與心跳靜默，故障及必要授權不得靜默。
+- 日結使用已核對帳務，費用未知不補零；保留完整日報欄位，對話只給短摘要。
+- 策略驗證延至 2026-09-21（星期一）。本次不呼叫券商、不下單、不變更模型或策略。
+- 技能不是背景常駐程式；通知排程、帳務聚合與跨重啟去重仍待接線。
+- `gold_system/close_eth_demo.py` 是開始時已存在的未追蹤檔案，本輪不修改或執行。
+- 已安裝至本機 `C:/Users/User/.codex/skills/trade-quiet-report/SKILL.md`，來源與安裝副本雜湊一致。
+- 基本 frontmatter／未完成標記檢查及 `git diff --check` 通過；官方 quick_validate 因兩個現有 Python 環境皆缺 PyYAML 未能執行，不宣稱正式驗證通過。人工檢視上列通知情境；尚未做模型行為實測或 token A/B 量測。本輪只改技能與文件，未重跑交易程式測試。
+
 ## 2026-09-20：登入頻率與日終對帳需求修訂
 
 使用者要求取消逐筆交易後重新登入，改在每日交易限制到達後重新登入對帳。
