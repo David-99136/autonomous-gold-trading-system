@@ -1,5 +1,25 @@
 # 第一階段實作報告
 
+## 2026-09-21：原始歷史品質與持久化封鎖
+
+新增 `history_quality.py` 及 Store 新倉鎖讀取：原始 GOLD MINUTE 完整性檢查、
+兩側價格摘要與修訂偵測，SQLite 原子保存稽核及異常鎖，不提供自動恢復。
+原始時間不轉收棒、沒有生成已驗證 K 線；正式網路 adapter 尚未呼叫此核心。
+用星期一四份原始快照離線重播，抓到交叉與 3 根修訂，正常後值／重啟保持封鎖。
+診斷使用獨立 runtime 資料庫，不修改既有交易庫，沒有券商或模型呼叫。
+新增 23 項測試（含 Paper 新倉阻擋／保留停損、Demo EntryGuard），完整 306 項通過，
+compileall／diff 通過。詳細架構及限制見 `docs/history-quality-guard.md`；未推送。
+
+## 2026-09-21：星期一 GOLD 唯讀驗證
+
+已測 Demo GOLD 市場、20 秒串流與 M1/M5/H1 原始資料，未修改 production 程式。
+開棒標記假設獲得本次 51 根 M5／4 根 H1 雙側完全匹配支持，但近期 REST 快照
+有 bid/ask 交叉及較早棒 ask 修訂，finality 尚未驗收。固定窗口後續兩次穩定，
+不將它誤稱為根因已修復。事後價格原型 77 個時點：73 NO_TRADE、4 SHORT 候選；
+沒有模擬或真實成交，不能算勝率或策略通過。相關 22 項測試通過。
+原始證據／診斷腳本僅存 runtime，報告見 `docs/research/gold-monday-validation-20260921.md`。
+無模型呼叫、無訂單、無 Live、未推送；下一步先處理行情品質驗證與恢復設計。
+
 ## 2026-09-20：分析呼叫持久化保護（工作包 4）
 
 新增 `analysis_journal.py`，接線至 `CodexFrameAnalysis`：原子預留、跨重啟上限、

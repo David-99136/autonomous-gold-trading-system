@@ -80,6 +80,12 @@ class EntryGuardTests(unittest.IsolatedAsyncioTestCase):
         self.store.stop_new_entries()
         self.assertFalse(await self.check())
 
+    async def test_history_quality_fault_blocks_demo_entry_guard(self):
+        from gold_system.history_quality import HistoryQualityMonitor
+        boundary = self.now.replace(second=0, microsecond=0)
+        HistoryQualityMonitor(self.store).observe({}, start=boundary, end=boundary, received_at=self.now)
+        self.assertFalse(await self.check())
+
     async def test_equity_reduction_reprices_size_not_old_approval(self):
         self.assertFalse(await self.check(equity=D(100)))
         self.assertFalse(await self.check(equity=D("NaN")))

@@ -88,6 +88,7 @@ class Store:
         # 缺值代表尚未下停止命令；壞資料或讀取失敗不能被當作允許新風險。
         try:
             return (self.get("operator_stop_new", False) is not False
-                    or self.get("daily_new_entries_blocked", False) is not False)
+                    or self.get("daily_new_entries_blocked", False) is not False
+                    or self.get("market_data_blocked", False) is not False)
         except Exception:
             return True
