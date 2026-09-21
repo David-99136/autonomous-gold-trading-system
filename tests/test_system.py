@@ -63,6 +63,22 @@ class SystemTests(unittest.TestCase):
         self.assertIsNone(self.broker.position)
         self.assertTrue(self.store.entries_stopped())
 
+    def test_history_fault_blocks_new_position(self):
+        from gold_system.history_quality import HistoryQualityMonitor
+        HistoryQualityMonitor(self.store).observe({}, start=self.now, end=self.now, received_at=self.now)
+        self.tick(self.s)
+        self.assertIsNone(self.broker.position)
+        self.assertTrue(self.store.entries_stopped())
+
+    def test_history_fault_does_not_disable_existing_stop(self):
+        from gold_system.history_quality import HistoryQualityMonitor
+        self.tick(self.s)
+        self.assertIsNotNone(self.broker.position)
+        HistoryQualityMonitor(self.store).observe({}, start=self.now, end=self.now, received_at=self.now)
+        self.tick(quote=Quote(self.now, D(1989), D("1989.5")))
+        self.assertIsNone(self.broker.position)
+        self.assertTrue(self.store.entries_stopped())
+
     def test_operator_stop_corrupt_value_is_fail_closed(self):
         self.store.set("operator_stop_new", "false")
         self.tick(self.s)
