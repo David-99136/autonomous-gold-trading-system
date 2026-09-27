@@ -66,6 +66,14 @@ SQLite 摘要儲存於 `runtime/demo-audit.db`，帳號以雜湊代替，原始�
 `demo-history` 要求新的輸出目錄，保留原始分頁、SHA-256 與接收時間。
 缺棒不插值；原始時間戳的開棒／收棒語意尚未實證，不能直接當成已驗收的回測輸入。
 
+已保存的 raw GOLD JSON 可用離線 `history-check` 核對品質、價格修訂與持久化資料鎖。
+需明確指定既有資料庫，或使用 `--create-diagnostic` 建立新診斷庫；不連線、不下單、不解鎖。
+完整參數與退出碼見 [離線資料核對說明](docs/history-offline-check.md)。
+
+另有 [唯讀證據採樣器](docs/history-sampler.md)：`history-sample-plan` 僅離線核對計畫，
+`demo-history-sample` 須明確確認後才登入 Demo 採集，無下單／解鎖能力。
+目前只完成合成傳輸測試，尚未完成這個採樣器的真實 Demo 驗證。
+
 ## 費用上限狀態
 
 ```powershell
@@ -176,3 +184,12 @@ Demo 獨立風控每次驗證時都讀取此狀態；既有停損與時間退出
 輸出檔必須尚不存在。訂閱成功不代表市場可交易；兩秒沒有有效報價即結束。
 行情過期、未來、重複或倒序均拒絕，不自動重連解鎖。此命令沒有下單功能。
 最新規格位置與驗證進度見 [更新日誌](docs/implementation-report.md)。
+
+## 專案協作者 (Contributors)
+
+本專案採多代理協作架構（Multi-Agent Co-Authoring），核心程式碼、架構防護與研究由以下協作者共同開發：
+
+- **David-99136** (專案擁有者 / Owner)
+- **Codex** (OpenAI / ChatGPT 驅動 — 初始交易核心、Order Gateway、風控引擎與分析代理)
+- **Antigravity** (Google DeepMind 驅動 — 歷史行情品質隔離、唯讀採樣器、訊號契約與多週期候選管線)
+

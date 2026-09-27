@@ -70,7 +70,7 @@ M1 原始 page SHA-256：`91d8c97b36599dcea35ec0d254d1ff8c3851479fe82def93ee0aaf
 离線完整性重查：
 
 ```powershell
-.\run.ps1 history-audit --directory runtime/gold-monday-20260921-bars-0220/m1
+.\.venv\Scripts\python.exe -m gold_system history-audit --directory runtime/gold-monday-20260921-bars-0220/m1
 ```
 
 既有多週期 14 項及串流 8 項測試通過，共 22 項；本輪未重跑全套 283 項。

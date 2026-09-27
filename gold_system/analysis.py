@@ -60,8 +60,16 @@ def analyze(h1, m5, m1, now, version="prototype-v1-unvalidated"):
     key = sha256((version + now.isoformat() + repr((h1, m5, m1))).encode()).hexdigest()
     direction, stop, target, reason = Direction.NO_TRADE, D(0), D(0), "DATA_INCOMPLETE"
     mode = Mode.RIGHT
+    # [Antigravity | 2026-09-27] 預設 spec §4 欄位
+    zone_id = ""
+    confirmation = ""
+    invalidation_price = D(0)
+    rule_score = D(0)
+    data_completeness = "INSUFFICIENT"
+
     if (len(h1) >= 3 and len(m5) >= 12 and len(m1) >= 2
             and continuous(h1, 60, now) and continuous(m5, 5, now) and continuous(m1, 1, now)):
+        data_completeness = "COMPLETE"
         a, b = h1[-2:]
         last, previous = m5[-1], m5[-2]
         bullish = b.high > a.high and b.low > a.low
@@ -69,8 +77,14 @@ def analyze(h1, m5, m1, now, version="prototype-v1-unvalidated"):
         reason = "STRUCTURE_UNCONFIRMED"
         if bullish and last.close > previous.high and m1[-1].close > m1[-2].high:
             direction, stop = Direction.LONG, min(x.low for x in m5[-3:])
+            zone_id = f"TREND_H1_BULL_{int(b.timestamp.timestamp())}"
+            confirmation = "M5_BREAKOUT_M1_TRIGGER_LONG"
+            rule_score = D("0.70")
         elif bearish and last.close < previous.low and m1[-1].close < m1[-2].low:
             direction, stop = Direction.SHORT, max(x.high for x in m5[-3:])
+            zone_id = f"TREND_H1_BEAR_{int(b.timestamp.timestamp())}"
+            confirmation = "M5_BREAKOUT_M1_TRIGGER_SHORT"
+            rule_score = D("0.70")
         if direction == Direction.NO_TRADE:
             for zone in reversed(zones(h1)):
                 # 先形成區域，再允許測試；不能事後替既有價格畫區。
@@ -82,13 +96,20 @@ def analyze(h1, m5, m1, now, version="prototype-v1-unvalidated"):
                 if (zone.kind == "DEMAND" and last.close > previous.high
                         and m1[-1].close > m1[-2].high):
                     direction, stop, mode = Direction.LONG, min(zone.low, previous.low), Mode.LEFT
+                    zone_id = f"ZONE_{zone.kind}_{int(zone.formed_at.timestamp())}"
+                    confirmation = "M5_REVERSAL_M1_TRIGGER_LONG"
+                    rule_score = D("0.80")
                     break
                 if (zone.kind == "SUPPLY" and last.close < previous.low
                         and m1[-1].close < m1[-2].low):
                     direction, stop, mode = Direction.SHORT, max(zone.high, previous.high), Mode.LEFT
+                    zone_id = f"ZONE_{zone.kind}_{int(zone.formed_at.timestamp())}"
+                    confirmation = "M5_REVERSAL_M1_TRIGGER_SHORT"
+                    rule_score = D("0.80")
                     break
         if direction != Direction.NO_TRADE:
             entry = m1[-1].close
+            invalidation_price = stop
             target = entry + direction.sign * abs(entry - stop) * 2
             # 目標優先受已知反向區域約束，不能只用任意 2R 假造報酬空間。
             obstacles = [z.low if direction == Direction.LONG else z.high for z in zones(h1)
@@ -97,4 +118,106 @@ def analyze(h1, m5, m1, now, version="prototype-v1-unvalidated"):
             if obstacles:
                 target = min([target, *obstacles]) if direction == Direction.LONG else max([target, *obstacles])
             reason = f"PROTOTYPE_{mode.value}_NOT_VALIDATED"
-    return Signal(key, version, now, now + timedelta(minutes=1), direction, mode, stop, target, reason)
+    return Signal(
+        signal_id=key, version=version, created=now, expires=now + timedelta(minutes=1),
+        direction=direction, mode=mode, stop=stop, target=target, reason=reason,
+        # [Antigravity | 2026-09-27] 填入 spec §4 完整契約欄位
+        zone_id=zone_id,
+        confirmation_condition=confirmation,
+        invalidation_price=invalidation_price,
+        rule_score=rule_score,
+        confidence=None,
+        data_completeness=data_completeness,
+    )
+
+
+# [Antigravity | 2026-09-27] 候選訊號管線：同時評估 RIGHT_CONTINUATION 與 LEFT_REVERSAL 候選
+def candidate_signals(h1, m5, m1, now, version="prototype-v1-unvalidated"):
+    """為 CodexFrameAnalysis 產出結構性候選訊號列表；無合格訊號時回傳空 tuple。"""
+    if not (len(h1) >= 3 and len(m5) >= 12 and len(m1) >= 2
+            and continuous(h1, 60, now) and continuous(m5, 5, now) and continuous(m1, 1, now)):
+        return ()
+
+    candidates = []
+    a, b = h1[-2:]
+    last, previous = m5[-1], m5[-2]
+    bullish = b.high > a.high and b.low > a.low
+    bearish = b.high < a.high and b.low < a.low
+
+    # 1. 右側趨勢延續 (RIGHT_CONTINUATION)
+    right_dir, right_stop = None, None
+    if bullish and last.close > previous.high and m1[-1].close > m1[-2].high:
+        right_dir, right_stop = Direction.LONG, min(x.low for x in m5[-3:])
+    elif bearish and last.close < previous.low and m1[-1].close < m1[-2].low:
+        right_dir, right_stop = Direction.SHORT, max(x.high for x in m5[-3:])
+
+    if right_dir is not None:
+        entry = m1[-1].close
+        if (right_dir == Direction.LONG and entry > right_stop) or (right_dir == Direction.SHORT and entry < right_stop):
+            target = entry + right_dir.sign * abs(entry - right_stop) * 2
+            obstacles = [z.low if right_dir == Direction.LONG else z.high for z in zones(h1)
+                         if (z.kind == "SUPPLY" if right_dir == Direction.LONG else z.kind == "DEMAND")
+                         and ((z.low - entry) if right_dir == Direction.LONG else (entry - z.high)) > 0]
+            if obstacles:
+                target = min([target, *obstacles]) if right_dir == Direction.LONG else max([target, *obstacles])
+            if abs(target - entry) >= abs(entry - right_stop) * D("1.5"):
+                sig_id = sha256((version + now.isoformat() + "RIGHT" + right_dir.value + str(entry)).encode()).hexdigest()
+                candidates.append(Signal(
+                    signal_id=sig_id, version=version, created=now, expires=now + timedelta(minutes=1),
+                    direction=right_dir, mode=Mode.RIGHT, stop=right_stop, target=target,
+                    reason="CANDIDATE_RIGHT_CONTINUATION",
+                    zone_id=f"TREND_H1_{'BULL' if right_dir == Direction.LONG else 'BEAR'}_{int(b.timestamp.timestamp())}",
+                    confirmation_condition=f"M5_BREAKOUT_M1_TRIGGER_{right_dir.value}",
+                    invalidation_price=right_stop, rule_score=D("0.70"), confidence=None,
+                    data_completeness="COMPLETE",
+                ))
+
+    # 2. 左側區域反轉 (LEFT_REVERSAL)
+    for zone in reversed(zones(h1)):
+        if zone.formed_at >= previous.timestamp:
+            continue
+        touched = previous.low <= zone.high and previous.high >= zone.low
+        if not touched:
+            continue
+        left_dir, left_stop = None, None
+        if zone.kind == "DEMAND" and last.close > previous.high and m1[-1].close > m1[-2].high:
+            left_dir, left_stop = Direction.LONG, min(zone.low, previous.low)
+        elif zone.kind == "SUPPLY" and last.close < previous.low and m1[-1].close < m1[-2].low:
+            left_dir, left_stop = Direction.SHORT, max(zone.high, previous.high)
+        if left_dir is not None:
+            entry = m1[-1].close
+            if (left_dir == Direction.LONG and entry > left_stop) or (left_dir == Direction.SHORT and entry < left_stop):
+                target = entry + left_dir.sign * abs(entry - left_stop) * 2
+                obstacles = [z.low if left_dir == Direction.LONG else z.high for z in zones(h1)
+                             if (z.kind == "SUPPLY" if left_dir == Direction.LONG else z.kind == "DEMAND")
+                             and ((z.low - entry) if left_dir == Direction.LONG else (entry - z.high)) > 0]
+                if obstacles:
+                    target = min([target, *obstacles]) if left_dir == Direction.LONG else max([target, *obstacles])
+                if abs(target - entry) >= abs(entry - left_stop) * D("1.5"):
+                    sig_id = sha256((version + now.isoformat() + "LEFT" + left_dir.value + str(zone.formed_at)).encode()).hexdigest()
+                    candidates.append(Signal(
+                        signal_id=sig_id, version=version, created=now, expires=now + timedelta(minutes=1),
+                        direction=left_dir, mode=Mode.LEFT, stop=left_stop, target=target,
+                        reason="CANDIDATE_LEFT_REVERSAL",
+                        zone_id=f"ZONE_{zone.kind}_{int(zone.formed_at.timestamp())}",
+                        confirmation_condition=f"M5_REVERSAL_M1_TRIGGER_{left_dir.value}",
+                        invalidation_price=left_stop, rule_score=D("0.80"), confidence=None,
+                        data_completeness="COMPLETE",
+                    ))
+                    break
+
+    return tuple(candidates)
+
+
+# [Antigravity | 2026-09-27] MarketFrame 轉接候選訊號
+def frame_candidates(frame, version="prototype-v1-unvalidated"):
+    """從 MarketFrame 擷取候選訊號，供 CodexFrameAnalysis 的 candidates callback 使用。"""
+    h1 = getattr(frame, "h1", ())
+    m5 = getattr(frame, "m5", ())
+    m1 = getattr(frame, "m1", ())
+    quote = getattr(frame, "quote", None)
+    now = getattr(quote, "timestamp", None)
+    if now is None or not h1 or not m5 or not m1:
+        return ()
+    return candidate_signals(h1, m5, m1, now, version=version)
+

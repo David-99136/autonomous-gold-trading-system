@@ -86,6 +86,16 @@ class EntryGuardTests(unittest.IsolatedAsyncioTestCase):
         HistoryQualityMonitor(self.store).observe({}, start=boundary, end=boundary, received_at=self.now)
         self.assertFalse(await self.check())
 
+    async def test_offline_import_failure_blocks_demo_entry_guard(self):
+        from gold_system.history_import import audit_file
+        # 查詢此測試 Store 的實際檔案；離線入口另開連線，確認封鎖跨連線可見。
+        database = self.store.db.execute("PRAGMA database_list").fetchone()[2]
+        result, code = audit_file(database, Path(self.tmp.name) / "missing.json",
+                                 start=self.now.isoformat(), end=self.now.isoformat(), received_at=self.now.isoformat())
+        self.assertEqual(code, 1)
+        self.assertTrue(result["lock_persisted"])
+        self.assertFalse(await self.check())
+
     async def test_equity_reduction_reprices_size_not_old_approval(self):
         self.assertFalse(await self.check(equity=D(100)))
         self.assertFalse(await self.check(equity=D("NaN")))
