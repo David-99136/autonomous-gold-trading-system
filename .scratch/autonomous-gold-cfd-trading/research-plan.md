@@ -25,6 +25,14 @@ Primary-source baseline: [Capital.com Gold Spot CFD 自動交易介面研究](..
 
 ## Research rules
 
+2026-09-27 R-05 update (separate from the original cutoff):
+[official documentation recheck](../../docs/research/capital-history-finality-review-20260927.md)
+and [local evidence / proposed sampling plan](../../docs/research/gold-history-evidence-plan-20260927.md).
+The four archived 2026-09-21 snapshots reproduce crossed prices and three revised overlapping bars.
+Per-request timing provenance remains incomplete. The inspected official sections do not establish
+an acceptance/finality contract. This research task is complete; R-05 and feed eligibility remain
+unresolved. No broker connection, sampling schedule, order or unlock was executed.
+
 2026-09-07 R-05 update: [timestamp semantics review](../../docs/research/capital-history-semantics.md)
 found no explicit public proof of open/close timestamp endpoints or finality. Offline `history-audit`
 verified the existing two-page, 1258-row capture is internally consistent, retaining the 12:31 UTC

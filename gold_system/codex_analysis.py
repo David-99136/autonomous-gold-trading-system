@@ -164,8 +164,12 @@ class CodexFrameAnalysis:
             def abstain(reason):
                 key = sha256((now.isoformat()+reason).encode()).hexdigest()
                 version = candidates[0].version if candidates else "prototype-v1-unvalidated"
-                return Signal(key, version, now, now+timedelta(seconds=30), Direction.NO_TRADE,
-                              Mode.RIGHT, D(0), D(0), reason)
+                return Signal(
+                    signal_id=key, version=version, created=now,
+                    expires=now+timedelta(seconds=30), direction=Direction.NO_TRADE,
+                    mode=Mode.RIGHT, stop=D(0), target=D(0), reason=reason,
+                    # NO_TRADE 信號使用所有新欄位的預設值（zone_id="", rule_score=D(0) …）
+                )
             if not candidates or evidence.get("evidence_eligible") is not True:
                 return abstain("EVIDENCE_OR_PRICE_CONFIRMATION_UNAVAILABLE")
             if self.store.entries_stopped() or self.calls >= self.max_calls:

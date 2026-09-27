@@ -6,17 +6,33 @@ from pathlib import Path
 
 
 class Store:
-    def __init__(self, path):
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(path)
-        self.db.execute("PRAGMA journal_mode=WAL")
-        self.db.executescript('''
-            CREATE TABLE IF NOT EXISTS events (
-                id INTEGER PRIMARY KEY, time TEXT NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS intents (id TEXT PRIMARY KEY, state TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-        ''')
-        self.db.commit()
+    # [Antigravity | 2026-09-27] 新增 must_exist 參數，支援離線診斷安全檢查與防止意外新建空庫
+    def __init__(self, path, *, must_exist=False):
+        if must_exist:
+            # mode=rw 在 SQLite 層拒絕建立空庫，避免 exists() 與 connect() 之間的競態。
+            self.db = sqlite3.connect(Path(path).resolve().as_uri() + "?mode=rw", uri=True)
+            try:
+                self.db.execute("SELECT key,value FROM state LIMIT 0")
+                self.db.execute("SELECT id,time,kind,payload FROM events LIMIT 0")
+                self.db.execute("SELECT id,state FROM intents LIMIT 0")
+            except BaseException:
+                self.db.close()
+                raise
+        else:
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            self.db = sqlite3.connect(path)
+        try:
+            self.db.execute("PRAGMA journal_mode=WAL")
+            self.db.executescript('''
+                CREATE TABLE IF NOT EXISTS events (
+                    id INTEGER PRIMARY KEY, time TEXT NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS intents (id TEXT PRIMARY KEY, state TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            ''')
+            self.db.commit()
+        except BaseException:
+            self.db.close()
+            raise
 
     def emit(self, kind, **payload):
         # 只接受明確的業務欄位；API 原始回應不直接寫進這裡。

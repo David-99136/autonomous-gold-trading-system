@@ -123,10 +123,14 @@ class HistoryQualityMonitor:
                           price_fingerprint_hash=_hash(parsed), received_at=received_text,
                           entries_enabled=False, closure_verified=False)
             payload = json.dumps(result, sort_keys=True)
-            self.db.execute("INSERT INTO history_quality_observations(received_at,payload) VALUES(?,?)", (observed, payload))
+            # [Antigravity | 2026-09-27] 新增 observation_id 與 verified_at 支援追溯與離線檢查回執
+            observation_id = self.db.execute(
+                "INSERT INTO history_quality_observations(received_at,payload) VALUES(?,?)",
+                (observed, payload)).lastrowid
             self.db.execute("INSERT INTO events(time,kind,payload) VALUES(?,?,?)", (observed, "HISTORY_QUALITY_OBSERVED", payload))
             self.db.commit()
-            return result
+            return result | {"observation_id": observation_id,
+                             "verified_at": datetime.now(timezone.utc).isoformat()}
         except BaseException:
             self.db.rollback()
             raise  # 持久化失敗必須由呼叫端停止，不能當成正常資料繼續。

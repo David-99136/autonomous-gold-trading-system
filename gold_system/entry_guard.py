@@ -75,10 +75,16 @@ class DemoEntryGuard:
             require(budget["analysis_available"] is True, "GUARD_BUDGET_UNAVAILABLE")
             request = row["request"]
             require(request["epic"] == "GOLD" and request["direction"] in ("BUY", "SELL"), "GUARD_INSTRUMENT")
-            signal = Signal(intent, request["version"], datetime.fromisoformat(request["created"]),
-                            datetime.fromisoformat(request["expires"]),
-                            Direction.LONG if request["direction"] == "BUY" else Direction.SHORT,
-                            Mode(request["mode"]), D(request["stopLevel"]), D(request["profitLevel"]), "JOURNAL_RECHECK")
+            signal = Signal(
+                signal_id=intent, version=request["version"],
+                created=datetime.fromisoformat(request["created"]),
+                expires=datetime.fromisoformat(request["expires"]),
+                direction=Direction.LONG if request["direction"] == "BUY" else Direction.SHORT,
+                mode=Mode(request["mode"]),
+                stop=D(request["stopLevel"]), target=D(request["profitLevel"]),
+                reason="JOURNAL_RECHECK",
+                # 新欄位使用預設值（Journal recheck 不重新評分）
+            )
             quality = replace(context.quality, budget_available=context.quality.budget_available and budget["analysis_available"])
             plan = make_plan(signal, context.quote, quality, context.contract, self.policy, context.equity, now)
             tick, maximum = context.price_tick, context.maximum_stop_distance

@@ -24,8 +24,12 @@ async def replay(output):
         engine = Engine(store, broker, contract, policy)
         start = datetime(2026, 1, 5, 14, tzinfo=timezone.utc)
         quality = Quality(True, True, True, False, D("0.6"), 0, D(120), D(12), False, True, True)
-        signal = Signal("synthetic-001", policy.version, start, start + timedelta(minutes=1),
-                        Direction.LONG, Mode.RIGHT, D(1990), D(2025), "SYNTHETIC_TEST_ONLY")
+        signal = Signal(
+            signal_id="synthetic-001", version=policy.version, created=start,
+            expires=start + timedelta(minutes=1), direction=Direction.LONG,
+            mode=Mode.RIGHT, stop=D(1990), target=D(2025), reason="SYNTHETIC_TEST_ONLY",
+            # 新欄位使用預設値（合成資料，不代表真實市場分析）
+        )
         for i, bid in enumerate(("2000", "2012", "2015", "2010")):
             now = start + timedelta(minutes=i)
             await engine.tick(now, Quote(now, D(bid), D(bid) + D("0.5")), quality,
@@ -77,6 +81,23 @@ def main():
     capture.add_argument("--output", required=True)
     audit = sub.add_parser("history-audit", help="Offline history checksums and reconstruction; no broker calls")
     audit.add_argument("--directory", required=True)
+    # [Antigravity | 2026-09-27] 離線 raw JSON 歷史品質核對入口（A 批）
+    history_check = sub.add_parser("history-check", help="Offline raw GOLD file quality check; never unlocks trading")
+    history_check.add_argument("--input", required=True, help="Local raw response JSON, at most 2 MiB")
+    history_check.add_argument("--database", required=True, help="Existing Store; no implicit creation")
+    history_check.add_argument("--create-diagnostic", action="store_true", help="Explicitly create a NEW diagnostic database")
+    history_check.add_argument("--start", required=True, help="Inclusive raw timestamp with UTC offset")
+    history_check.add_argument("--end", required=True, help="Inclusive raw timestamp with UTC offset")
+    history_check.add_argument("--received-at", required=True, help="Caller-supplied receipt timestamp with UTC offset")
+    # [Antigravity | 2026-09-27] Demo 唯讀歷史採樣器計畫核對與受限執行入口
+    sample_plan = sub.add_parser("history-sample-plan", help="Validate local sampling plan and print canonical hash; offline")
+    sample_plan.add_argument("--plan", required=True)
+    sample_run = sub.add_parser("demo-history-sample", help="Explicit bounded Demo read-only evidence capture; no orders")
+    sample_run.add_argument("--plan", required=True)
+    sample_run.add_argument("--plan-sha256", required=True)
+    sample_run.add_argument("--output-name", required=True, help="New directory name under project runtime")
+    sample_run.add_argument("--confirm-demo-read-only", action="store_true")
+    sample_run.add_argument("--exclusive-account", action="store_true", help="Confirm no other API clients use this account")
     reconcile = sub.add_parser("demo-reconcile", help="Read-only Demo exposure inspection; never unlocks trading")
     reconcile.add_argument("--database", default="runtime/demo-audit.db")
     reconcile.add_argument("--async-http", action="store_true", help="Use pooled async Demo reads; writes remain disabled")
@@ -99,7 +120,26 @@ def main():
     daily.add_argument("--account-hash", help="Optional account SHA-256 for verified settlement totals; never a raw account ID")
     daily.add_argument("--output", required=True, help="New Markdown file; never overwrite")
     args = parser.parse_args()
-    if args.command == "replay":
+    if args.command in ("history-sample-plan", "demo-history-sample"):
+        try:
+            if args.command == "history-sample-plan":
+                from .sampler_plan import read_plan, digest
+                plan = read_plan(args.plan)
+                result = dict(status="PLAN_VALID", plan_sha256=digest(plan), queries=len(plan["queries"]),
+                              start=plan["start"], end=plan["end"], entries_enabled=False, qualified=False)
+                code = 0
+            else:
+                from .sampler_cli import run_demo
+                result = asyncio.run(run_demo(args.plan, args.plan_sha256, args.output_name,
+                    confirmed=args.confirm_demo_read_only, exclusive_account=args.exclusive_account))
+                code = 0 if result["status"] == "COMPLETED_UNVERIFIED" else 1
+        except Exception:
+            # 不直接輸出 vault、檔案路徑、HTTP 或外部 JSON 的例外原文。
+            result, code = dict(status="FAILED", reason="SAMPLER_COMMAND_FAILED",
+                                entries_enabled=False, closure_verified=False, qualified=False), 1
+        print(json.dumps(result))
+        raise SystemExit(code)
+    elif args.command == "replay":
         asyncio.run(replay(args.output))
     elif args.command == "daily-report":
         from .reporting import write_report
@@ -122,6 +162,12 @@ def main():
     elif args.command == "history-audit":
         from .history import audit_download
         print(json.dumps(audit_download(args.directory), ensure_ascii=False))
+    elif args.command == "history-check":
+        from .history_import import audit_file
+        result, code = audit_file(args.database, args.input, start=args.start, end=args.end,
+                                  received_at=args.received_at, create_diagnostic=args.create_diagnostic)
+        print(json.dumps(result, ensure_ascii=False))
+        raise SystemExit(code)
     elif args.command == "stop-new":
         if not Path(args.database).is_file():
             parser.error("stop-new requires an existing database; no database was created")

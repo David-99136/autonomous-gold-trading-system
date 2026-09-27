@@ -76,6 +76,10 @@ class Contract:
             raise ValueError("Invalid contract")
 
 
+# [Antigravity | 2026-09-27] 補完 spec §4 Directional Signal 契約
+_COMPLETENESS_VALUES = frozenset(("COMPLETE", "PARTIAL", "INSUFFICIENT"))
+
+
 @dataclass(frozen=True)
 class Signal:
     signal_id: str
@@ -87,6 +91,25 @@ class Signal:
     stop: Decimal
     target: Decimal
     reason: str
+    # [Antigravity | 2026-09-27] spec §4 擴展欄位（全有預設值，向後相容 Codex 既有呼叫）
+    zone_id: str = ""
+    confirmation_condition: str = ""
+    invalidation_price: Decimal = D(0)
+    rule_score: Decimal = D(0)
+    confidence: "Decimal | None" = None
+    data_completeness: str = "INSUFFICIENT"
+
+    def __post_init__(self):
+        # [Antigravity | 2026-09-27] Signal 數值與狀態範圍防護
+        if not self.invalidation_price.is_finite():
+            raise ValueError("invalidation_price must be finite")
+        if not (self.rule_score.is_finite() and D(0) <= self.rule_score <= D(1)):
+            raise ValueError("rule_score must be finite and in [0, 1]")
+        if self.confidence is not None:
+            if not (self.confidence.is_finite() and D(0) <= self.confidence <= D(1)):
+                raise ValueError("confidence must be finite and in [0, 1] when not None")
+        if self.data_completeness not in _COMPLETENESS_VALUES:
+            raise ValueError(f"data_completeness must be one of {sorted(_COMPLETENESS_VALUES)}")
 
 
 @dataclass(frozen=True)
