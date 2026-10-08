@@ -20,12 +20,16 @@ class PyramidingTests(unittest.TestCase):
         self.quality = Quality(True, True, True, False, D(1), 0, D(120), D(10), False, True, True)
         self.quote = Quote(self.now, D(2000), D("2000.5"))
         self.signal = Signal("initial", self.policy.version, self.now, self.now+timedelta(minutes=1),
-                             Direction.LONG, Mode.RIGHT, D(1990), D(2050), "test")
+                             Direction.LONG, Mode.RIGHT, D(1990), D(2050), "test",
+                             # [Codex | 2026-09-27] 完整測試契約。
+                             zone_id="test-zone", confirmation_condition="TEST_CONFIRMED",
+                             invalidation_price=D(1990), data_completeness="COMPLETE")
         self.broker = PaperBroker()
 
     def prepare(self, direction=Direction.LONG):
         if direction == Direction.SHORT:
-            self.signal = replace(self.signal, direction=direction, stop=D(2010), target=D(1950))
+            self.signal = replace(self.signal, direction=direction, stop=D(2010), target=D(1950),
+                                  invalidation_price=D(2010))
         plan = make_plan(self.signal, self.quote, self.quality, self.contract, self.policy, self.broker.balance, self.now)
         self.broker.open(plan, self.contract)
         p = self.broker.position
@@ -43,7 +47,8 @@ class PyramidingTests(unittest.TestCase):
     def test_two_sided_stop_slippage_equals_pretrade_risk(self):
         for direction in (Direction.LONG, Direction.SHORT):
             broker = PaperBroker()
-            signal = self.signal if direction == Direction.LONG else replace(self.signal, direction=direction, stop=D(2010), target=D(1950))
+            signal = self.signal if direction == Direction.LONG else replace(self.signal, direction=direction,
+                stop=D(2010), target=D(1950), invalidation_price=D(2010))
             plan = make_plan(signal, self.quote, self.quality, self.contract, self.policy, broker.balance, self.now)
             broker.open(plan, self.contract)
             quote = Quote(self.now, signal.stop, signal.stop+D("0.5")) if direction == Direction.LONG else Quote(self.now, signal.stop-D("0.5"), signal.stop)

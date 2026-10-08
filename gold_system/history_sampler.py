@@ -185,12 +185,17 @@ async def capture(plan, reader, archive, clock):
             while True:
                 stamp()
                 age = clock.mono()-estimate["anchor_monotonic"]
-                if age >= 30:
-                    await sync()
-                    continue
                 remaining = (at-clock.wall()).total_seconds()
+                # [Codex | 2026-09-27] 已到期的價格請求優先；校時三連發加下一次
+                # 節流至少需要約 4 秒。接近查詢時先採樣，60 秒有效期仍由 request 強制。
                 if remaining <= 0:
                     break
+                if age >= 30:
+                    if remaining <= 4:
+                        await clock.sleep(remaining)
+                        break
+                    await sync()
+                    continue
                 await clock.sleep(min(remaining, 30-age))
             if clock.wall() > at+timedelta(seconds=1):
                 raise SampleError("SCHEDULE_MISSED")

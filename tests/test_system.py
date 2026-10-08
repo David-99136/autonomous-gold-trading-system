@@ -27,6 +27,9 @@ class SystemTests(unittest.TestCase):
             created=self.now, expires=self.now + timedelta(minutes=1),
             direction=Direction.LONG, mode=Mode.RIGHT,
             stop=D(1990), target=D(2030), reason="test",
+            # [Codex | 2026-09-27] 正常新倉 fixture 必須提供完整契約。
+            zone_id="test-zone", confirmation_condition="TEST_CONFIRMED",
+            invalidation_price=D(1990), data_completeness="COMPLETE",
         )
         self.broker = PaperBroker()
         self.engine = Engine(self.store, self.broker, self.contract, self.policy)
@@ -47,6 +50,23 @@ class SystemTests(unittest.TestCase):
         self.assertLessEqual(p.risk, D(25))
         self.assertLessEqual(p.margin, D(2000))
         self.assertEqual((p.size / 2) % self.contract.increment, 0)
+
+    # [Codex | 2026-09-27] 缺欄位或已失效訊號只封鎖新風險。
+    def test_incomplete_or_invalidated_signal_cannot_create_plan(self):
+        for changes in ({"data_completeness": "INSUFFICIENT"},
+                        {"data_completeness": "PARTIAL"}, {"zone_id": ""},
+                        {"confirmation_condition": ""}, {"invalidation_price": D(0)},
+                        {"invalidation_price": D(2010)}, {"invalidation_price": D(2000)}):
+            with self.subTest(changes=changes), self.assertRaises(Rejected):
+                self.plan(replace(self.s, **changes))
+
+    # [Codex | 2026-09-27] 空頭使用 ask 作為失效檢查，觸及邊界即拒單。
+    def test_short_invalidation_uses_exit_side(self):
+        short = replace(self.s, direction=Direction.SHORT, stop=D(2010), target=D(1970),
+                        invalidation_price=D(2005))
+        self.assertGreater(self.plan(short).size, 0)
+        with self.assertRaisesRegex(Rejected, "SIGNAL_INVALIDATED"):
+            self.plan(replace(short, invalidation_price=D("2000.5")))
 
     def test_operator_stop_persists_across_connections_and_blocks_entry(self):
         control = Store(Path(self.tmp.name) / "audit.db")
@@ -144,7 +164,8 @@ class SystemTests(unittest.TestCase):
                 self.plan(signal=s)
 
     def test_short_sizing(self):
-        p = self.plan(signal=replace(self.s, direction=Direction.SHORT, stop=D(2010), target=D(1970)))
+        p = self.plan(signal=replace(self.s, direction=Direction.SHORT, stop=D(2010), target=D(1970),
+                                    invalidation_price=D(2010)))
         self.assertGreater(p.size, 0)
 
     def test_partial_and_stop_tightening(self):

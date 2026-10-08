@@ -21,7 +21,10 @@ class OpenReconciliationTests(unittest.IsolatedAsyncioTestCase):
         self.contract = Contract("GOLD", D(1), D("0.01"), D("0.01"), D(100), D("0.05"), D("0.05"))
         now = datetime.now(timezone.utc)
         signal = Signal("one", self.policy.version, now, now+timedelta(minutes=1), Direction.LONG,
-                        Mode.RIGHT, D(1990), D(2030), "fixture")
+                        Mode.RIGHT, D(1990), D(2030), "fixture",
+                        # [Codex | 2026-09-27] 完整測試契約。
+                        zone_id="test-zone", confirmation_condition="TEST_CONFIRMED",
+                        invalidation_price=D(1990), data_completeness="COMPLETE")
         self.plan = Plan(signal, D(2000), D("0.1"), D("1.02"), D("10.0005"))
         self.journal.prepare(self.plan, "GOLD", sha256(b"account").hexdigest())
         self.payload = {"dealReference": "o_ref", "dealStatus": "ACCEPTED", "status": "OPEN",
@@ -112,7 +115,8 @@ class OpenReconciliationTests(unittest.IsolatedAsyncioTestCase):
         self.store.close()
         self.store = Store(Path(self.tmp.name)/"short.db")
         self.journal = OrderJournal(self.store)
-        plan = replace(self.plan, signal=replace(self.plan.signal, direction=Direction.SHORT, stop=D(2010), target=D(1970)))
+        plan = replace(self.plan, signal=replace(self.plan.signal, direction=Direction.SHORT, stop=D(2010),
+                                               target=D(1970), invalidation_price=D(2010)))
         self.journal.prepare(plan, "GOLD", sha256(b"account").hexdigest())
         self.acknowledge()
         self.payload.update(direction="SELL", level="1999.9")

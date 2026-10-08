@@ -22,7 +22,10 @@ class AsyncCapitalTests(unittest.IsolatedAsyncioTestCase):
         self.journal = OrderJournal(self.store)
         now = datetime.now(timezone.utc)
         signal = Signal("order1", "test", now, now+timedelta(minutes=1), Direction.LONG,
-                        Mode.RIGHT, D("1990.01"), D("2030.12"), "test")
+                        Mode.RIGHT, D("1990.01"), D("2030.12"), "test",
+                        # [Codex | 2026-09-27] 完整測試契約。
+                        zone_id="test-zone", confirmation_condition="TEST_CONFIRMED",
+                        invalidation_price=D("1990.01"), data_completeness="COMPLETE")
         self.journal.prepare(Plan(signal, D(2000), D("0.12"), D(2), D(10)), "GOLD", sha256(b"account").hexdigest())
         self.requests = []
         self.response_mode = "normal"

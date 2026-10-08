@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from hashlib import sha256
 
 from .core import D, Direction, Plan, Rejected
+from .risk import validate_entry_contract
 
 
 class OrderJournal:
@@ -37,12 +38,20 @@ class OrderJournal:
                 or any(not isinstance(x, D) or not x.is_finite() or x <= 0 for x in
                        (plan.entry, plan.size, plan.risk, plan.margin, plan.signal.stop, plan.signal.target))):
             raise Rejected("INVALID_GATEWAY_PLAN")
+        # [Codex | 2026-09-27] 不允許以手造 Plan 繞過完整契約，並保存重驗所需欄位。
+        validate_entry_contract(plan.signal)
         request = {"epic": epic, "direction": "BUY" if plan.signal.direction == Direction.LONG else "SELL",
                    "size": str(plan.size), "stopLevel": str(plan.signal.stop),
                    "profitLevel": str(plan.signal.target), "planned_entry": str(plan.entry),
                    "risk": str(plan.risk), "margin": str(plan.margin), "version": plan.signal.version,
                    "mode": plan.signal.mode, "created": plan.signal.created.isoformat(),
-                   "expires": plan.signal.expires.isoformat()}
+                   "expires": plan.signal.expires.isoformat(),
+                   "zone_id": plan.signal.zone_id,
+                   "confirmation_condition": plan.signal.confirmation_condition,
+                   "invalidation_price": str(plan.signal.invalidation_price),
+                   "rule_score": str(plan.signal.rule_score),
+                   "confidence": None if plan.signal.confidence is None else str(plan.signal.confidence),
+                   "data_completeness": plan.signal.data_completeness}
         encoded = json.dumps(request, sort_keys=True, separators=(",", ":"))
         digest = sha256(encoded.encode()).hexdigest()
         intent = plan.signal.signal_id

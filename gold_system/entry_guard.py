@@ -84,6 +84,14 @@ class DemoEntryGuard:
                 stop=D(request["stopLevel"]), target=D(request["profitLevel"]),
                 reason="JOURNAL_RECHECK",
                 # 新欄位使用預設值（Journal recheck 不重新評分）
+                # [Codex | 2026-09-27] 修正上述舊行為：不重評分，但必須恢復原契約。
+                # 舊紀錄缺欄位會走 GUARD_INPUT_UNAVAILABLE，不能推定已完整。
+                zone_id=request["zone_id"],
+                confirmation_condition=request["confirmation_condition"],
+                invalidation_price=D(request["invalidation_price"]),
+                rule_score=D(request["rule_score"]),
+                confidence=None if request["confidence"] is None else D(request["confidence"]),
+                data_completeness=request["data_completeness"],
             )
             quality = replace(context.quality, budget_available=context.quality.budget_available and budget["analysis_available"])
             plan = make_plan(signal, context.quote, quality, context.contract, self.policy, context.equity, now)

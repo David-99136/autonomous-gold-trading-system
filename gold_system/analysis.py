@@ -1,7 +1,8 @@
 """可重播的多週期價格分析原型；門檻尚未經策略驗收，不具 Live 資格。"""
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from hashlib import sha256
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, replace
+import json
 from .core import D, Direction, Mode, Signal
 
 
@@ -33,7 +34,11 @@ def zones(h1):
 
 
 def continuous(bars, minutes, now):
-    return (bool(bars) and all(b.valid() and b.timestamp <= now for b in bars)
+    # [Codex | 2026-09-27] Bar 的時間是 UTC 收盤邊界；連續但錯位的資料也不合格。
+    return (isinstance(now, datetime) and now.utcoffset() is not None and bool(bars)
+            and all(b.valid() and b.timestamp <= now
+                    and not b.timestamp.second and not b.timestamp.microsecond
+                    and b.timestamp.astimezone(timezone.utc).minute % minutes == 0 for b in bars)
             and all(b.timestamp - a.timestamp == timedelta(minutes=minutes)
                     for a, b in zip(bars, bars[1:]))
             and timedelta(0) <= now - bars[-1].timestamp < timedelta(minutes=minutes))
@@ -161,9 +166,8 @@ def candidate_signals(h1, m5, m1, now, version="prototype-v1-unvalidated"):
             if obstacles:
                 target = min([target, *obstacles]) if right_dir == Direction.LONG else max([target, *obstacles])
             if abs(target - entry) >= abs(entry - right_stop) * D("1.5"):
-                sig_id = sha256((version + now.isoformat() + "RIGHT" + right_dir.value + str(entry)).encode()).hexdigest()
                 candidates.append(Signal(
-                    signal_id=sig_id, version=version, created=now, expires=now + timedelta(minutes=1),
+                    signal_id="", version=version, created=now, expires=now + timedelta(minutes=1),
                     direction=right_dir, mode=Mode.RIGHT, stop=right_stop, target=target,
                     reason="CANDIDATE_RIGHT_CONTINUATION",
                     zone_id=f"TREND_H1_{'BULL' if right_dir == Direction.LONG else 'BEAR'}_{int(b.timestamp.timestamp())}",
@@ -194,9 +198,8 @@ def candidate_signals(h1, m5, m1, now, version="prototype-v1-unvalidated"):
                 if obstacles:
                     target = min([target, *obstacles]) if left_dir == Direction.LONG else max([target, *obstacles])
                 if abs(target - entry) >= abs(entry - left_stop) * D("1.5"):
-                    sig_id = sha256((version + now.isoformat() + "LEFT" + left_dir.value + str(zone.formed_at)).encode()).hexdigest()
                     candidates.append(Signal(
-                        signal_id=sig_id, version=version, created=now, expires=now + timedelta(minutes=1),
+                        signal_id="", version=version, created=now, expires=now + timedelta(minutes=1),
                         direction=left_dir, mode=Mode.LEFT, stop=left_stop, target=target,
                         reason="CANDIDATE_LEFT_REVERSAL",
                         zone_id=f"ZONE_{zone.kind}_{int(zone.formed_at.timestamp())}",
@@ -206,7 +209,16 @@ def candidate_signals(h1, m5, m1, now, version="prototype-v1-unvalidated"):
                     ))
                     break
 
-    return tuple(candidates)
+    # [Codex | 2026-09-27] 完整內容與證據綁定：資料修訂不能沿用舊意圖的 ID。
+    history = [[asdict(bar) for bar in bars] for bars in (h1, m5, m1)]
+    def identity(signal):
+        payload = {"schema": "candidate-v2", "signal": asdict(signal), "history": history}
+        payload["signal"].pop("signal_id")
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False,
+                             default=lambda v: v.astimezone(timezone.utc).isoformat()
+                             if isinstance(v, datetime) else str(v))
+        return replace(signal, signal_id=sha256(encoded.encode()).hexdigest())
+    return tuple(identity(signal) for signal in candidates)
 
 
 # [Antigravity | 2026-09-27] MarketFrame 轉接候選訊號
@@ -217,7 +229,9 @@ def frame_candidates(frame, version="prototype-v1-unvalidated"):
     m1 = getattr(frame, "m1", ())
     quote = getattr(frame, "quote", None)
     now = getattr(quote, "timestamp", None)
-    if now is None or not h1 or not m5 or not m1:
+    # [Codex | 2026-09-27] 保留上游品質封鎖，不能只靠根數重新宣告 COMPLETE。
+    quality = getattr(frame, "quality", None)
+    if (now is None or not h1 or not m5 or not m1 or not quote.valid()
+            or getattr(quality, "data_complete", False) is not True):
         return ()
     return candidate_signals(h1, m5, m1, now, version=version)
-

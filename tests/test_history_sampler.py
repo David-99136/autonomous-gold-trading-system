@@ -106,6 +106,36 @@ class SamplerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual({r.url.host for r in self.requests}, {"demo-api-capital.backend-capital.com"})
         self.assertEqual([(r.method, r.url.path) for r in self.requests if r.method != "GET"], [("POST", "/api/v1/session")])
 
+    # [Codex | 2026-09-27] 到期／即將到期的採樣優先於背景校時。
+    async def test_clock_refresh_does_not_steal_price_slots(self):
+        for second in (30, 31, 32, 33, 34, 35):
+            with self.subTest(second=second):
+                self.clock = FakeClock()
+                self.requests.clear()
+                plan = copy.deepcopy(self.plan)
+                plan["queries"][0]["at"] = "2026-01-05T10:00:15Z"
+                plan["queries"][1]["at"] = f"2026-01-05T10:00:{second}Z"
+                archive = Archive(self.root, f"slot-{second}")
+                result = await capture(plan, self.reader(), archive, self.clock)
+                self.assertEqual(result["status"], "COMPLETED_UNVERIFIED")
+                self.assertEqual(sum(r.url.path.endswith("/prices/GOLD") for r in self.requests), 2)
+
+    # [Codex | 2026-09-27] 連續最小間距查詢仍須校時，不能無限延後到估計失效。
+    async def test_dense_sampling_keeps_schedule_and_clock_estimates_fresh(self):
+        template = self.plan["queries"][0]
+        self.plan["queries"] = [dict(template, at=(self.clock.base+timedelta(seconds=s)).isoformat())
+                                for s in range(15, 111, 5)]
+        result = await self.run_capture()
+        self.assertEqual(result["status"], "COMPLETED_UNVERIFIED")
+        prices = [r for r in self.receipts() if r["kind"] == "PRICES"]
+        self.assertEqual(len(prices), 20)
+        for receipt, query in zip(prices, self.plan["queries"]):
+            at = datetime.fromisoformat(query["at"])
+            sent = datetime.fromisoformat(receipt["send_start"]["utc"])
+            self.assertGreaterEqual(sent, at)
+            self.assertLessEqual(sent-at, timedelta(seconds=1))
+            self.assertLessEqual(receipt["clock_estimate"]["age_seconds"], 60)
+
     async def test_http_error_and_redirect_stop_without_body_or_retry(self):
         for status in (401, 429, 500, 302):
             with self.subTest(status=status):

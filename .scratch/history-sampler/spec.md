@@ -46,6 +46,8 @@ reader／archive／clock 在 Seam 注入，fake Adapter 與正式 Adapter 使用
   都計入次數，單回應上限沿用傳輸的 1 MiB。任一預算不足便停止，不追加額度。
 - 本批診斷 client 間隔至少 1 秒，串行送出，無自動 retry／重新登入。
   時鐘三次採樣及每 30 秒 refresh 同樣受此排程與總預算約束。
+  [Codex | 2026-09-27] 排程修正：到期價格查詢優先，距下一筆查詢不超過 4 秒時，
+  refresh 延至下一可用間隙；價格使用的估計仍不得超過既有 60 秒有效期。
 - request 的排隊上限與 HTTP 執行 deadline 分開計算，避免沿用現有 2 秒總 timeout
   包含較長排隊時間而誤判；送出與等待均不得超過 run deadline。
 - 提案預設排队／送出總時限最多 5 秒（登入最多 10 秒），不更動交易 client 的設定。

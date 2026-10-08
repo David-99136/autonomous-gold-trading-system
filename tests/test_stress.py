@@ -55,7 +55,10 @@ class StressTests(unittest.TestCase):
             bars.append(Candle(bid, ask, True, True, now+timedelta(hours=8), D(1), False))
         def analysis(h1, m5, m1, at):
             return Signal(str(at.timestamp()), RiskPolicy().version, at, at+timedelta(minutes=1),
-                          Direction.LONG, Mode.RIGHT, D(1990), D(2030), "SYNTHETIC_FIXTURE")
+                          Direction.LONG, Mode.RIGHT, D(1990), D(2030), "SYNTHETIC_FIXTURE",
+                          # [Codex | 2026-09-27] 完整合成契約，不代表市場證據。
+                          zone_id="synthetic", confirmation_condition="SYNTHETIC_ONLY",
+                          invalidation_price=D(1990), data_completeness="COMPLETE")
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root/"input.csv").write_text("synthetic placeholder for source hash", encoding="utf-8")

@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from dataclasses import replace
@@ -31,7 +32,11 @@ class EntryGuardTests(unittest.IsolatedAsyncioTestCase):
         quote = Quote(self.now, D(2000), D("2000.5"))
         quality = Quality(True, True, True, False, D(1), 0, D(120), D(10), False, True, True)
         signal = Signal("one", self.policy.version, self.now, self.now+timedelta(minutes=1),
-                        Direction.LONG, Mode.RIGHT, D(1990), D(2030), "test")
+                        Direction.LONG, Mode.RIGHT, D(1990), D(2030), "test",
+                        # [Codex | 2026-09-27] 完整訊號必須穿越 Journal 邊界。
+                        zone_id="test-zone", confirmation_condition="TEST_CONFIRMED",
+                        invalidation_price=D(1995), rule_score=D("0.70"), confidence=D("0.60"),
+                        data_completeness="COMPLETE")
         plan = make_plan(signal, quote, quality, contract, self.policy, D(10000), self.now)
         self.journal.prepare(plan, "GOLD", self.account_hash)
         self.journal.transition("one", "SUBMITTING")
@@ -58,6 +63,28 @@ class EntryGuardTests(unittest.IsolatedAsyncioTestCase):
         for changes in ({"demo_enabled": False}, {"strategy_validated": False}, {"contract_verified": False},
                         {"soft_locked": True}, {"hard_locked": True}):
             self.assertFalse(await self.check(**changes))
+
+    # [Codex | 2026-09-27] quote 已越過失效價但未碰原停損，仍須拒絕開倉。
+    async def test_signal_contract_survives_journal_and_invalidation_blocks(self):
+        request = self.journal.get("one")["request"]
+        self.assertEqual(request["invalidation_price"], "1995")
+        self.assertEqual(request["data_completeness"], "COMPLETE")
+        self.assertEqual(request["zone_id"], "test-zone")
+        self.assertEqual(request["confirmation_condition"], "TEST_CONFIRMED")
+        self.assertEqual(request["rule_score"], "0.70")
+        self.assertEqual(request["confidence"], "0.60")
+        self.assertFalse(await self.check(quote=Quote(self.now, D(1994), D("1994.5"))))
+
+    async def test_legacy_persisted_intent_without_contract_is_rejected(self):
+        # [Codex | 2026-09-27] 建立舊版持久化 fixture；不提供自動補齊／解鎖遷移。
+        legacy = self.journal.get("one")["request"]
+        for key in ("zone_id", "confirmation_condition", "invalidation_price", "rule_score",
+                    "confidence", "data_completeness"):
+            legacy.pop(key)
+        self.store.db.execute("UPDATE gateway_orders SET request=? WHERE intent_id=?",
+                              (json.dumps(legacy), "one"))
+        self.store.db.commit()
+        self.assertFalse(await self.check())
 
     async def test_realized_loss_gate_and_day_freshness(self):
         self.assertFalse(await self.check(realized_daily_pnl=D(-300)))

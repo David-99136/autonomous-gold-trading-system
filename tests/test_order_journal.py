@@ -19,7 +19,10 @@ class OrderJournalTests(unittest.TestCase):
         self.journal = OrderJournal(self.store)
         now = datetime.now(timezone.utc)
         signal = Signal("order1", "test", now, now+timedelta(minutes=1), Direction.LONG,
-                        Mode.RIGHT, D(1990), D(2030), "Not stored: private prose")
+                        Mode.RIGHT, D(1990), D(2030), "Not stored: private prose",
+                        # [Codex | 2026-09-27] 完整測試契約。
+                        zone_id="test-zone", confirmation_condition="TEST_CONFIRMED",
+                        invalidation_price=D(1990), data_completeness="COMPLETE")
         self.plan = Plan(signal, D(2000), D("0.1"), D("1.02"), D(10))
         self.journal.prepare(self.plan, "GOLD", "a"*64)
 
@@ -88,6 +91,15 @@ class OrderJournalTests(unittest.TestCase):
         with self.assertRaises(Rejected):
             self.journal.prepare(self.plan, "GOLD", "b"*64)
         self.assertNotIn("private prose", str(self.journal.get("order1")))
+
+    # [Codex | 2026-09-27] 新倉完整性與失效價也屬不可變意圖內容。
+    def test_incomplete_plan_rejected_and_signal_contract_change_conflicts(self):
+        incomplete = replace(self.plan.signal, signal_id="incomplete", data_completeness="INSUFFICIENT")
+        with self.assertRaisesRegex(Rejected, "SIGNAL_INCOMPLETE"):
+            self.journal.prepare(replace(self.plan, signal=incomplete), "GOLD", "a"*64)
+        changed = replace(self.plan.signal, invalidation_price=D(1995))
+        with self.assertRaisesRegex(Rejected, "INTENT_CONTENT_CONFLICT"):
+            self.journal.prepare(replace(self.plan, signal=changed), "GOLD", "a"*64)
 
     def test_same_account_second_open_is_blocked_even_after_confirmation(self):
         self.run_flow(AsyncMock(return_value={"dealReference": "o_ref"}), AsyncMock(return_value={"outcome": "CONFIRMED"}))

@@ -29,6 +29,9 @@ async def replay(output):
             expires=start + timedelta(minutes=1), direction=Direction.LONG,
             mode=Mode.RIGHT, stop=D(1990), target=D(2025), reason="SYNTHETIC_TEST_ONLY",
             # 新欄位使用預設値（合成資料，不代表真實市場分析）
+            # [Codex | 2026-09-27] 新倉契約已收緊，僅為合成示範明確填值。
+            zone_id="SYNTHETIC_ONLY", confirmation_condition="SYNTHETIC_ONLY",
+            invalidation_price=D(1990), data_completeness="COMPLETE",
         )
         for i, bid in enumerate(("2000", "2012", "2015", "2010")):
             now = start + timedelta(minutes=i)

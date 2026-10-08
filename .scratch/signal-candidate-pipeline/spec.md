@@ -30,3 +30,9 @@ Type: task
 
 完成 `gold_system/analysis.py` 升級與 `tests/test_candidate_pipeline.py`，新增 8 項測試，全數通過（總計 378 項通過）。詳情見 `issues/01-candidate-generator.md`。
 
+### 2026-09-27 審查後補驗收
+
+[Codex | 2026-09-27] 原 378 項結果未涵蓋完整 Engine 接線；本次補上 LEFT、
+資料完整性／未收盤邊界、ID 修訂，以及 Codex 選訊號 → Engine → PaperBroker
+開倉／退出驗證。契約已接入新風險與 Journal 重驗；完整 401 項通過。
+細節與限制見 [修補報告](../../docs/review-gap-repair-20260927.md)，不代表 Demo 或 Live 資格。

@@ -24,8 +24,12 @@ class ReversalTests(unittest.TestCase):
         self.quote = Quote(self.now, D(2000), D("2000.5"))
         self.quality = Quality(True, True, True, False, D(1), 0, D(120), D(10), False, True, True)
         self.long = Signal("long", self.policy.version, self.now, self.now+timedelta(minutes=1),
-                           Direction.LONG, Mode.RIGHT, D(1990), D(2030), "fixture")
-        self.short = replace(self.long, signal_id="short", direction=Direction.SHORT, stop=D(2010), target=D(1970))
+                           Direction.LONG, Mode.RIGHT, D(1990), D(2030), "fixture",
+                           # [Codex | 2026-09-27] 完整測試契約。
+                           zone_id="test-zone", confirmation_condition="TEST_CONFIRMED",
+                           invalidation_price=D(1990), data_completeness="COMPLETE")
+        self.short = replace(self.long, signal_id="short", direction=Direction.SHORT, stop=D(2010),
+                             target=D(1970), invalidation_price=D(2010))
 
     def tearDown(self):
         self.store.close()

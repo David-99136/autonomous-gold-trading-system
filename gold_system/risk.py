@@ -23,13 +23,27 @@ def validate_signal(signal, policy, now):
         raise Rejected("INVALID_PRICES")
 
 
+# [Codex | 2026-09-27] 此契約只限制新風險，不加入共用的退出驗證器。
+def validate_entry_contract(signal):
+    if (signal.data_completeness != "COMPLETE"
+            or not all(isinstance(v, str) and v.strip()
+                       for v in (signal.zone_id, signal.confirmation_condition))):
+        raise Rejected("SIGNAL_INCOMPLETE")
+    if (not isinstance(signal.invalidation_price, D)
+            or not signal.invalidation_price.is_finite() or signal.invalidation_price <= 0):
+        raise Rejected("INVALID_INVALIDATION_PRICE")
+
+
 def make_plan(signal, quote, quality, contract, policy, equity, now, *, require_half=True):
     def require(condition, reason):
         if not condition:
             raise Rejected(reason)
 
     validate_signal(signal, policy, now)
+    validate_entry_contract(signal)
     require(quote.valid(), "INVALID_QUOTE")
+    require((quote.exit(signal.direction) - signal.invalidation_price) * signal.direction.sign > 0,
+            "SIGNAL_INVALIDATED")
     require(0 <= (now - quote.timestamp).total_seconds() <= 2, "STALE_QUOTE")
     require(quality.tradeable and quality.liquid_window, "MARKET_UNAVAILABLE")
     require(quality.data_complete and quality.analysis_available, "DATA_UNAVAILABLE")

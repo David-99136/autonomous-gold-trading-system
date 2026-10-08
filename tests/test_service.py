@@ -25,7 +25,10 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.engine = Engine(self.store, PaperBroker(), self.contract, self.policy)
         self.quality = Quality(True, True, True, False, D(1), 0, D(120), D(10), False, True, True)
         self.signal = Signal("signal1", self.policy.version, self.now, self.now+timedelta(minutes=1),
-                             Direction.LONG, Mode.RIGHT, D(1990), D(2030), "fixture")
+                             Direction.LONG, Mode.RIGHT, D(1990), D(2030), "fixture",
+                             # [Codex | 2026-09-27] 完整測試契約。
+                             zone_id="test-zone", confirmation_condition="TEST_CONFIRMED",
+                             invalidation_price=D(1990), data_completeness="COMPLETE")
 
     async def asyncTearDown(self):
         self.store.close()
